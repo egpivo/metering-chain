@@ -19,6 +19,24 @@ The goal is to keep metering semantics explicit, testable, and reproducible.
 - CLI (`cli.rs`) translates user input into domain commands
 - Optional sequencing logic lives in `chain/` (PoA / PoW)
 
+## Storage Abstraction (Minimal Semantics)
+Domain logic depends on a small storage interface. Implementations may use sled,
+files, or other engines, but must preserve append-only and snapshot semantics.
+
+```rust
+pub trait Storage {
+    // append-only
+    fn append_tx(&mut self, tx: &SignedTx) -> Result<()>;
+
+    // snapshot (state + last applied tx id)
+    fn load_state(&self) -> Result<Option<(State, u64)>>;
+    fn persist_state(&mut self, state: &State, last_tx_id: u64) -> Result<()>;
+
+    // replay
+    fn load_txs_from(&self, from_tx_id: u64) -> Result<Vec<SignedTx>>;
+}
+```
+
 ## CLI
 - No business logic
 - Responsible only for parsing input and formatting output

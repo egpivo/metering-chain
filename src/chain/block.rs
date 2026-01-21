@@ -1,6 +1,7 @@
 use crate::tx::Transaction;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Block {
     pub timestamp: i64,
     pub pre_block_hash: String,
@@ -24,5 +25,15 @@ impl Block {
             nonce: 0,
             height,
         }
+    }
+
+    /// Serialize block into compact bytes (for storage/network).
+    pub fn to_bytes(&self) -> Result<Vec<u8>, bincode::Error> {
+        bincode::serialize(self)
+    }
+
+    /// Deserialize block from bytes (for storage/network).
+    pub fn from_bytes(data: &[u8]) -> Result<Block, bincode::Error> {
+        bincode::deserialize(data)
     }
 }

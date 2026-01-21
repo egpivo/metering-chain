@@ -1,11 +1,13 @@
-#[derive(Debug, Clone)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transaction {
     pub id: Vec<u8>,
     pub vin: Vec<TXInput>,
     pub vout: Vec<TXOutput>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TXInput {
     pub txid: Vec<u8>,
     pub vout: usize,
@@ -13,7 +15,7 @@ pub struct TXInput {
     pub pub_key: Vec<u8>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TXOutput {
     pub value: i32,
     pub pub_key_hash: Vec<u8>,
