@@ -34,9 +34,14 @@ Represents a usage ledger for a specific service owned by an account.
 - `locked_deposit: u64` — committed funds (refunded on closure)
 
 **Lifecycle States**
-- **Inactive**: meter exists but does not accept consumption (genesis state, or after closure)
+- **Inactive**: meter exists but does not accept consumption (after CloseMeter)
 - **Active**: meter accepts consumption transactions (after OpenMeter)
-- **Transition**: Inactive → Active (via OpenMeter), Active → Inactive (via CloseMeter)
+
+**Lifecycle Transitions**
+- **OpenMeter**: Creates a new meter or reopens a closed meter
+  - If meter does not exist: create with `total_units = 0`, `total_spent = 0`, `locked_deposit = deposit`
+  - If meter exists but is inactive: reactivate, preserve `total_units` and `total_spent`, set new `locked_deposit = deposit`
+- **CloseMeter**: Active → Inactive, returns `locked_deposit` to balance
 
 **Invariants**
 - Only the owner may operate the meter
@@ -64,7 +69,7 @@ Creates new funds (authority-only).
 ---
 
 ### OpenMeter
-Creates a new meter for a service.
+Creates a new meter for a service, or reopens a closed meter.
 
 **Parameters**
 - `signer: String`
@@ -75,9 +80,14 @@ Creates a new meter for a service.
 
 **Rules**
 - `signer == owner`
-- `signer.nonce == nonce`
+- `accounts[signer].nonce == nonce`
+- `deposit > 0`
 - Owner balance ≥ deposit
 - No existing active meter for `(owner, service_id)`
+
+**Behavior**
+- If meter does not exist: create new meter with zero totals
+- If meter exists but is inactive: reactivate, preserve historical totals, set new deposit
 
 ---
 
@@ -94,8 +104,10 @@ Records usage and deducts cost.
 
 **Rules**
 - `signer == owner`
-- `signer.nonce == nonce`
+- `accounts[signer].nonce == nonce`
 - Meter exists and is active
+- `units > 0`
+- Pricing parameters are strictly positive (`UnitPrice(price)` where `price > 0`, or `FixedCost(cost)` where `cost > 0`)
 - Owner balance ≥ computed cost
 - Cost computation must not overflow
 
@@ -112,7 +124,7 @@ Closes a meter and returns locked deposit.
 
 **Rules**
 - `signer == owner`
-- `signer.nonce == nonce`
+- `accounts[signer].nonce == nonce`
 - Meter exists and is active
 
 ---
