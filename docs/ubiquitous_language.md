@@ -21,7 +21,7 @@ A logical usage ledger for a specific service owned by an account.
 
 - Identity: `(owner, service_id)`
 - Tracks: total usage, spending, and locked deposit
-- Lifecycle: can be inactive, active, or closed
+- Lifecycle: can be inactive or active
 - Not a physical device or sensor
 
 ---
@@ -64,6 +64,22 @@ The account that authorized and issued a transaction.
 
 - Must match relevant owners for authorization
 - Used for nonce checking and replay protection
+
+---
+
+### Mint From
+The authority account recorded on a mint transaction.
+
+- Used only by `Mint`
+- Must be a member of `authorized_minters`
+
+---
+
+### Authorized Minter
+An account permitted to mint new funds.
+
+- Identified by membership in `authorized_minters`
+- Used to validate `Mint.from`
 
 ---
 

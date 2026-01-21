@@ -4,6 +4,7 @@ pub mod state;
 pub mod storage;
 pub mod error;
 pub mod logger;
+pub mod config;
 
 use sha2::{Sha256, Digest};
 
