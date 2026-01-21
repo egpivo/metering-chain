@@ -46,11 +46,16 @@ Mint increases total system value by `T.amount`.
 - `accounts[T.signer].nonce == T.nonce`
 
 ### State Update
-- Create meter `(T.owner, T.service_id)` with:
-  - `active = true`
-  - `total_units = 0`
-  - `total_spent = 0`
-  - `locked_deposit = T.deposit`
+- If meter `(T.owner, T.service_id)` does not exist:
+  - Create meter with:
+    - `active = true`
+    - `total_units = 0`
+    - `total_spent = 0`
+    - `locked_deposit = T.deposit`
+- If meter exists but is inactive:
+  - Set `active = true`
+  - Preserve `total_units` and `total_spent`
+  - Set `locked_deposit = T.deposit`
 - `accounts[T.owner].balance -= T.deposit`
 - `accounts[T.signer].nonce += 1`
 
