@@ -150,3 +150,8 @@ Benefits:
 - Provide library APIs for embedding in other apps
 - Expose REST/gRPC for remote queries
 
+### Phase 5 — Storage/Performance (optional, scale-driven)
+- Write batching for higher throughput (keep append-only semantics)
+- Range iterators for reporting or history scans
+- Zero-copy reads when log/snapshot size is large
+- Storage engine optimizations (LSM/flash) only if required by deployment

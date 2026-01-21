@@ -1,4 +1,4 @@
 pub mod transaction;
 pub mod validation;
 
-pub use transaction::{Transaction, TXInput, TXOutput};
+pub use transaction::{Transaction, Pricing, SignedTx};

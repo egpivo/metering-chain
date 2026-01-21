@@ -37,6 +37,13 @@ pub trait Storage {
 }
 ```
 
+## Filesystem Semantics (Infrastructure)
+Filesystem interactions must be crash-safe and deterministic.
+
+- Transaction log writes are append-only and fsync before ack
+- Snapshots are written to a new file, fsync, then atomically renamed
+- Replay reads the log sequentially; old log segments may be rotated or pruned
+
 ## CLI
 - No business logic
 - Responsible only for parsing input and formatting output

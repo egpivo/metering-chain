@@ -28,21 +28,22 @@ impl ProofOfWork {
         data
     }
 
-    pub fn run(&self) -> (i64, String) {
+    pub fn run(&self) -> crate::error::Result<(i64, String)> {
         let mut nonce = 0;
-        let mut hash = Vec::new();
         Logger::info("Mining the block");
         while nonce < MAX_NONCE {
             let data = self.prepare_data(nonce);
-            hash = crate::sha256_digest(data.as_slice());
+            let hash = crate::sha256_digest(data.as_slice());
             let hash_int = BigInt::from_bytes_be(Sign::Plus, hash.as_slice());
             if hash_int.lt(self.target.borrow()) {
                 Logger::info(&hex_encode(hash.as_slice()));
-                break;
+                return Ok((nonce, hex_encode(hash.as_slice())));
             } else {
                 nonce += 1;
             }
         }
-        (nonce, hex_encode(hash.as_slice()))
+        // Exhausted nonce range without finding valid hash
+        Logger::error("Mining failed: exhausted nonce range");
+        Err(crate::error::Error::MiningExhausted)
     }
 }
