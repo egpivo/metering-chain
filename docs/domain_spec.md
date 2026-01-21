@@ -59,11 +59,12 @@ Commands represent **intent**, not state patches.
 Creates new funds (authority-only).
 
 **Parameters**
+- `from: String`
 - `to: String`
 - `amount: u64`
 
 **Rules**
-- Caller must be authorized
+- `from ∈ authorized_minters`
 - Target account must exist or be created
 
 ---
@@ -144,20 +145,20 @@ flowchart TD
     O --> S
     U --> S
     Z --> S
-    S --> N[State'<br/>nonce++<br/>balance/meter updated]
+    S --> N[State'<br/>nonce++ for account-issued txs<br/>balance/meter updated]
     X --> E[State unchanged]
 ```
 
 **Validation checks:**
-- Nonce monotonicity (`accounts[signer].nonce == tx.nonce`)
-- Authorization (signer matches owner/authority)
+- Nonce monotonicity (`accounts[signer].nonce == tx.nonce`) for account-issued txs
+- Authorization (Mint: `from ∈ authorized_minters`; Meter ops: `signer == owner`)
 - Sufficient balance (for deposits/consumption)
 - Meter state (exists, active, uniqueness)
 - Pricing/units validity
 
 **State updates:**
 - Account balance changes
-- Account nonce increment
+- Account nonce increment (account-issued txs only)
 - Meter state changes (active, totals, deposit)
 
 ---
