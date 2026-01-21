@@ -129,6 +129,39 @@ Closes a meter and returns locked deposit.
 
 ---
 
+## Transaction Flow
+
+```mermaid
+flowchart TD
+    A[SignedTx] --> B[Validate preconditions]
+    B -->|invalid| X[Reject: return error]
+    B -->|valid| C{Tx kind}
+    C -->|Mint| M[Apply Mint]
+    C -->|OpenMeter| O[Apply OpenMeter]
+    C -->|Consume| U[Apply Consume]
+    C -->|CloseMeter| Z[Apply CloseMeter]
+    M --> S[Update State]
+    O --> S
+    U --> S
+    Z --> S
+    S --> N[State'<br/>nonce++<br/>balance/meter updated]
+    X --> E[State unchanged]
+```
+
+**Validation checks:**
+- Nonce monotonicity (`accounts[signer].nonce == tx.nonce`)
+- Authorization (signer matches owner/authority)
+- Sufficient balance (for deposits/consumption)
+- Meter state (exists, active, uniqueness)
+- Pricing/units validity
+
+**State updates:**
+- Account balance changes
+- Account nonce increment
+- Meter state changes (active, totals, deposit)
+
+---
+
 ## Pricing
 
 Pricing must be explicit to avoid ambiguous cost calculation.
