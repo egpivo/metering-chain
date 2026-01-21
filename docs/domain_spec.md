@@ -34,9 +34,9 @@ Represents a usage ledger for a specific service owned by an account.
 - `locked_deposit: u64` — committed funds (refunded on closure)
 
 **Lifecycle States**
-- **Inactive**: meter exists but does not accept consumption; deposit may be locked
-- **Active**: meter accepts consumption transactions
-- **Closed**: meter was active but is now closed; deposit refunded
+- **Inactive**: meter exists but does not accept consumption (genesis state, or after closure)
+- **Active**: meter accepts consumption transactions (after OpenMeter)
+- **Transition**: Inactive → Active (via OpenMeter), Active → Inactive (via CloseMeter)
 
 **Invariants**
 - Only the owner may operate the meter
@@ -67,11 +67,15 @@ Creates new funds (authority-only).
 Creates a new meter for a service.
 
 **Parameters**
+- `signer: String`
+- `nonce: u64`
 - `owner: String`
 - `service_id: String`
 - `deposit: u64`
 
 **Rules**
+- `signer == owner`
+- `signer.nonce == nonce`
 - Owner balance ≥ deposit
 - No existing active meter for `(owner, service_id)`
 
@@ -81,15 +85,35 @@ Creates a new meter for a service.
 Records usage and deducts cost.
 
 **Parameters**
+- `signer: String`
+- `nonce: u64`
 - `owner: String`
 - `service_id: String`
 - `units: u64`
 - `pricing: Pricing`
 
 **Rules**
+- `signer == owner`
+- `signer.nonce == nonce`
 - Meter exists and is active
-- Units > 0
 - Owner balance ≥ computed cost
+- Cost computation must not overflow
+
+---
+
+### CloseMeter
+Closes a meter and returns locked deposit.
+
+**Parameters**
+- `signer: String`
+- `nonce: u64`
+- `owner: String`
+- `service_id: String`
+
+**Rules**
+- `signer == owner`
+- `signer.nonce == nonce`
+- Meter exists and is active
 
 ---
 
