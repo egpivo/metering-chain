@@ -1,103 +1,133 @@
-# State Transitions — Formal Specification
+# State Transitions
 
-Following the Ethereum Yellow Paper approach, we specify state transitions as **pure functions** over state. Each transaction type defines preconditions (validation) and postconditions (state changes).
+This document defines valid state transitions for the metering domain.
+All transitions are deterministic and side-effect free.
+
+---
 
 ## Notation
 
-- \( S \) = Current state (accounts, meters)
-- \( T \) = Transaction
-- \( S' \) = New state after applying T
-- \( \rightarrow \) = State transition function
-- \( \checkmark \) = Validation predicate (true if transaction is valid)
+- `S`   : current state (accounts, meters)
+- `T`   : transaction
+- `S'`  : resulting state
+- `✓`   : validation predicate
 
-## General Form
-
-A metering transaction is a pure function over state:
+A transaction is applied as:
 
 \[
-(S, T) \rightarrow (S', \text{receipt}) \text{ where } \checkmark(S, T) = \text{true}
+(S, T) \rightarrow S' \quad \text{iff} \quad ✓(S, T)
 \]
 
-If \( \checkmark(S, T) = \text{false} \), the transition is rejected and state remains unchanged.
+If validation fails, the transition is rejected and state remains unchanged.
+
+---
 
 ## Transaction: Mint
 
-### Preconditions (\( \checkmark(S, T) \))
-- \( T.from \in \text{authorized\_minters} \)
-- \( T.to \) account exists or will be created
-- \( T.amount > 0 \)
+### Preconditions
+- `T.from ∈ authorized_minters`
+- `T.amount > 0`
+- `T.to` exists or is created
 
-### Postconditions
-- \( S'.accounts[T.to].balance = S.accounts[T.to].balance + T.amount \)
-- All other state unchanged
-- Receipt: `{ type: "mint", to: T.to, amount: T.amount }`
+### State Update
+- `accounts[T.to].balance += T.amount`
+
+All other state remains unchanged.
+
+---
 
 ## Transaction: OpenMeter
 
-### Preconditions (\( \checkmark(S, T) \))
-- \( S.accounts[T.owner].balance \geq T.deposit \)
-- No active meter exists for \( (T.owner, T.service\_id) \)
-- \( T.deposit > 0 \)
+### Preconditions
+- `accounts[T.owner].balance ≥ T.deposit`
+- No active meter exists for `(T.owner, T.service_id)`
+- `T.deposit > 0`
+- `accounts[T.signer].nonce == T.nonce`
 
-### Postconditions
-- Create new meter: \( S'.meters[(T.owner, T.service\_id)] = \{ \text{active}: \text{true}, \text{total\_units}: 0, \text{total\_spent}: 0, \text{owner}: T.owner \} \)
-- \( S'.accounts[T.owner].balance = S.accounts[T.owner].balance - T.deposit \)
-- \( S'.accounts[T.owner].nonce = S.accounts[T.owner].nonce + 1 \)
-- Receipt: `{ type: "open_meter", owner: T.owner, service_id: T.service_id, deposit: T.deposit }`
+### State Update
+- Create meter `(T.owner, T.service_id)` with:
+  - `active = true`
+  - `total_units = 0`
+  - `total_spent = 0`
+  - `locked_deposit = T.deposit`
+- `accounts[T.owner].balance -= T.deposit`
+- `accounts[T.signer].nonce += 1`
+
+---
 
 ## Transaction: Consume
 
-### Cost Calculation Function
+### Cost Function
+
 \[
-\text{cost} =
+cost =
 \begin{cases}
-T.units \times T.pricing.unit\_price & \text{if } T.pricing = \text{UnitPrice}(unit\_price) \\
-T.pricing.fixed\_cost & \text{if } T.pricing = \text{FixedCost}(fixed\_cost)
+units \times unit\_price & \text{if pricing = UnitPrice} \\
+fixed\_cost              & \text{if pricing = FixedCost}
 \end{cases}
 \]
 
-### Preconditions (\( \checkmark(S, T) \))
-- Meter exists: \( (T.owner, T.service\_id) \in S.meters \)
-- \( S.meters[(T.owner, T.service\_id)].active = \text{true} \)
-- \( T.owner = S.meters[(T.owner, T.service\_id)].owner \)
-- \( T.units > 0 \)
-- \( \text{cost} > 0 \) (based on pricing model)
-- \( S.accounts[T.owner].balance \geq \text{cost} \)
-- \( S.accounts[T.owner].nonce = T.nonce \)
+### Preconditions
+- Meter `(T.owner, T.service_id)` exists
+- Meter is active
+- `T.signer == T.owner`
+- `units > 0`
+- `cost > 0` (no overflow in computation)
+- `accounts[T.owner].balance ≥ cost`
+- `accounts[T.signer].nonce == T.nonce`
 
-### Postconditions
-- \( S'.meters[(T.owner, T.service\_id)].total\_units = S.meters[(T.owner, T.service\_id)].total\_units + T.units \)
-- \( S'.meters[(T.owner, T.service\_id)].total\_spent = S.meters[(T.owner, T.service\_id)].total\_spent + \text{cost} \)
-- \( S'.accounts[T.owner].balance = S.accounts[T.owner].balance - \text{cost} \)
-- \( S'.accounts[T.owner].nonce = S.accounts[T.owner].nonce + 1 \)
-- Receipt: `{ type: "consume", owner: T.owner, service_id: T.service_id, units: T.units, cost: cost, pricing: T.pricing }`
+### State Update
+- `meters[(T.owner, T.service_id)].total_units += units`
+- `meters[(T.owner, T.service_id)].total_spent += cost`
+- `accounts[T.owner].balance -= cost`
+- `accounts[T.signer].nonce += 1`
+
+---
+
+## Transaction: CloseMeter
+
+### Preconditions
+- Meter `(T.owner, T.service_id)` exists
+- Meter is active
+- `T.signer == T.owner`
+- `accounts[T.signer].nonce == T.nonce`
+
+### State Update
+- `meters[(T.owner, T.service_id)].active = false`
+- `accounts[T.owner].balance += meters[(T.owner, T.service_id)].locked_deposit`
+- `accounts[T.signer].nonce += 1`
+
+---
 
 ## State Reconstruction
 
-**Theorem:** State is fully reconstructible by replaying transaction log from genesis.
+State is fully derivable from the transaction log.
 
-Given transaction sequence \( T_1, T_2, ..., T_n \):
+Let:
 
 \[
-S_0 = \text{genesis\_state}
+S_0 = genesis
 \]
+
 \[
-S_{i} = \text{apply}(S_{i-1}, T_i) \text{ for } i = 1 \to n
-\]
-\[
-S_n = \text{final\_state}
+S_i = apply(S_{i-1}, T_i), \quad i = 1 \dots n
 \]
 
-This property enables **auditability** and **deterministic testing**.
+Then `S_n` is the unique final state for transaction sequence
+`T_1 … T_n`.
 
-## Implementation Notes
+---
 
-1. **Pure Functions:** All transitions should be implemented as pure functions with no side effects.
-2. **Error Handling:** Invalid transitions return error with specific invariant violation.
-3. **Receipts:** Optional for MVP, but recommended for event-driven architectures.
-4. **Overflow Protection:** All arithmetic operations must check for overflow/underflow.
+## Implementation Constraints
+
+- Transitions must be implemented as pure functions
+- No hidden state, randomness, or external side effects
+- Arithmetic must be overflow-safe
+- Errors must identify the violated invariant
+
+---
 
 ## References
-- Domain spec: `docs/domain_spec.md`
+- Domain specification: `docs/domain_spec.md`
 - Invariants: `docs/invariants.md`
 - Architecture: `docs/architecture.md`

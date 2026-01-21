@@ -1,98 +1,100 @@
 # Domain Specification — Metering Chain
 
 ## Overview
-Metering Chain models **service usage metering and billing** as a domain-driven system. The core domain is **metering**: tracking service consumption, calculating costs, and ensuring fair billing.
-
-## Core Domain Concepts
-
-### Aggregate: Account
-Represents a **financial entity** that can own meters and pay for service usage.
-
-**Attributes:**
-- `balance: u64` — Available funds (in smallest currency unit)
-- `nonce: u64` — Sequence number for transaction ordering and replay protection
-
-**Invariants:**
-- Balance never goes negative
-- Nonce increases monotonically per account
-
-### Aggregate: Meter
-Represents a **service metering point** owned by an account.
-
-**Attributes:**
-- `service_id: String` — Unique service identifier
-- `total_units: u64` — Cumulative units consumed
-- `total_spent: u64` — Cumulative amount spent
-- `active: bool` — Whether the meter is active
-- `owner: String` — Account address that owns this meter
-
-**Invariants:**
-- Only owner can operate on meter
-- One active meter per (owner, service_id) pair
-- Units and spent are non-decreasing
-
-### Domain Commands (Transactions)
-
-#### Mint
-**Purpose:** Create new funds (typically by authority)
-
-**Parameters:**
-- `to: String` — Recipient account address
-- `amount: u64` — Amount to mint
-
-**Preconditions:**
-- Only authority can execute mint
-- `to` account exists (or will be created)
-
-#### OpenMeter
-**Purpose:** Create a new metering point for a service
-
-**Parameters:**
-- `owner: String` — Account that will own the meter
-- `service_id: String` — Service identifier
-- `deposit: u64` — Initial deposit amount
-
-**Preconditions:**
-- `owner` has sufficient balance for deposit
-- No active meter exists for (owner, service_id)
-
-#### Consume
-**Purpose:** Record service usage and deduct costs
-
-**Parameters:**
-- `owner: String` — Meter owner
-- `service_id: String` — Service being consumed
-- `units: u64` — Units consumed
-- `pricing: Pricing` — Pricing model (UnitPrice or FixedCost)
-
-**Preconditions:**
-- Meter exists and is active
-- Owner has sufficient funds
-- Units > 0
-
-### Pricing Models
-
-```rust
-enum Pricing {
-    UnitPrice(u64),    // Cost per unit
-    FixedCost(u64),    // Fixed total cost
-}
-```
-
-## Domain Events (Optional, for future extensions)
-- `MeterOpened { owner, service_id, deposit }`
-- `ConsumptionRecorded { owner, service_id, units, cost }`
-- `FundsTransferred { from, to, amount }`
-
-## Business Rules Summary
-1. **Conservation**: Total balance across all accounts + locked funds is preserved (except for mint/burn)
-2. **Authorization**: Only meter owners can consume against their meters
-3. **Fairness**: Costs are calculated deterministically based on declared pricing
-4. **Auditability**: All state changes are traceable through transaction history
+Metering Chain models **service usage and billing** as a deterministic state machine.
+The domain focuses on metering correctness rather than product workflows.
 
 ---
 
-## References
-- Architecture: `docs/architecture.md`
-- Invariants: `docs/invariants.md`
-- State transitions: `docs/state_transitions.md`
+## Core Domain Concepts
+
+### Account (Aggregate)
+Represents a payer with balance and transaction ordering.
+
+**State**
+- `balance: u64`
+- `nonce: u64`
+
+**Invariants**
+- Balance never becomes negative
+- Nonce is strictly increasing per account
+
+---
+
+### Meter (Aggregate)
+Represents a usage ledger for a specific service owned by an account.
+
+**Identity**
+- `(owner, service_id)`
+
+**State**
+- `total_units: u64`
+- `total_spent: u64`
+- `active: bool`
+- `locked_deposit: u64`
+
+**Invariants**
+- Only the owner may operate the meter
+- At most one active meter per `(owner, service_id)`
+- `total_units` and `total_spent` are monotonic
+- `locked_deposit` represents committed funds
+
+---
+
+## Domain Commands (Transactions)
+
+Commands represent **intent**, not state patches.
+
+### Mint
+Creates new funds (authority-only).
+
+**Parameters**
+- `to: String`
+- `amount: u64`
+
+**Rules**
+- Caller must be authorized
+- Target account must exist or be created
+
+---
+
+### OpenMeter
+Creates a new meter for a service.
+
+**Parameters**
+- `owner: String`
+- `service_id: String`
+- `deposit: u64`
+
+**Rules**
+- Owner balance ≥ deposit
+- No existing active meter for `(owner, service_id)`
+
+---
+
+### Consume
+Records usage and deducts cost.
+
+**Parameters**
+- `owner: String`
+- `service_id: String`
+- `units: u64`
+- `pricing: Pricing`
+
+**Rules**
+- Meter exists and is active
+- Units > 0
+- Owner balance ≥ computed cost
+
+---
+
+## Pricing
+
+Pricing must be explicit to avoid ambiguous cost calculation.
+
+```rust
+enum Pricing {
+    UnitPrice(u64),   // units × price
+    FixedCost(u64),   // fixed total cost
+}
+```

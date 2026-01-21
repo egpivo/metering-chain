@@ -1,121 +1,139 @@
-# Ubiquitous Language — Metering Chain
+# Ubiquitous Language
 
-This document defines the **shared vocabulary** used throughout the metering chain domain. All team members, documentation, and code should use these terms consistently.
+This document defines the domain vocabulary used throughout the metering chain.
+Terms listed here must be used consistently in code and documentation.
+
+---
 
 ## Core Terms
 
 ### Account
-A **financial entity** identified by an address that holds balance and owns meters.
+An address-identified entity that holds balance and owns meters.
 
-**Synonyms:** wallet, user account, payer
-**Not:** database user, system account
+- Holds: balance, nonce
+- Owns: meters
+- Not a system or database user
+
+---
 
 ### Meter
-A **service metering point** that tracks usage for a specific service owned by an account.
+A logical usage ledger for a specific service owned by an account.
 
-**Synonyms:** usage tracker, billing point
-**Not:** physical meter, sensor
+- Identity: `(owner, service_id)`
+- Tracks: total usage, spending, and locked deposit
+- Not a physical device or sensor
+
+---
 
 ### Service ID
-A **unique identifier** for a service type (e.g., "electricity", "storage", "api-calls").
+A stable identifier for a service type (e.g. `storage`, `api_calls`).
 
-**Not:** service instance, meter ID
+- Identifies service category
+- Not a meter identifier or instance ID
+
+---
 
 ### Units
-The **quantitative measure** of service consumption (e.g., kWh for electricity, GB for storage).
+A quantitative measure of service consumption.
 
-**Synonyms:** quantity, amount consumed
-**Not:** cost, price
+- Represents usage only
+- Never represents cost or value
+
+---
 
 ### Balance
-The **available funds** in an account that can be used for service payments.
+Spendable funds held by an account.
 
-**Synonyms:** available funds, credit
-**Not:** total spent, locked funds
+- Used to pay for consumption
+- Excludes historical spend and locked deposits
 
-### Deposit
-**Funds committed** to enable service usage (may be locked or deducted).
+---
 
-**Synonyms:** collateral, commitment
-**Not:** payment, fee
+### Locked Deposit
+Funds committed to enable a meter and held until meter closure.
+
+- Backed by account balance at meter creation
+- Returned to balance when meter is closed
+- Not spendable while locked
+
+---
+
+### Signer
+The account that authorized and issued a transaction.
+
+- Must match relevant owners for authorization
+- Used for nonce checking and replay protection
+
+---
 
 ### Consume
-The **act of recording** service usage and deducting the corresponding cost.
+A domain operation that records usage and deducts cost.
 
-**Synonyms:** use service, charge usage
-**Not:** pay, transfer funds
+- Mutates both meter and account state
+- Requires signer authorization
+- Not a fund transfer
+
+---
 
 ### Pricing
-The **cost calculation method** for service usage (unit price or fixed cost).
+Defines how usage cost is computed.
 
-**Synonyms:** cost model, billing model
-**Not:** price list, tariff
+- Explicit and deterministic
+- Either unit-based or fixed-cost
+
+---
 
 ## Transaction Types
 
 ### Mint
-**Create new funds** in the system (typically by authority).
-
-**Example:** "Mint 1000 tokens to account A"
-
-### OpenMeter
-**Create a new meter** for tracking service usage.
-
-**Example:** "Open a meter for electricity service with 500 deposit"
-
-### Consume
-**Record service usage** and deduct costs.
-
-**Example:** "Consume 10 units of storage at $0.10 per unit"
-
-## States and Status
-
-### Active Meter
-A meter that **can accept consumption** transactions.
-
-**Opposite:** Inactive meter
-
-### Nonce
-A **sequence number** that prevents transaction replay and ensures ordering.
-
-**Synonyms:** sequence number, counter
-**Not:** timestamp, version
-
-### Invariant
-A **business rule** that must always hold true in the system.
-
-**Synonyms:** constraint, rule, property
-**Not:** validation, check
-
-## Domain Operations
-
-### Apply
-**Execute a transaction** to transform state deterministically.
-
-**Synonyms:** process, execute
-**Not:** validate, persist
-
-### Validate
-**Check if a transaction** meets all preconditions and invariants.
-
-**Synonyms:** verify, check
-**Not:** apply, execute
-
-### Reconstruct
-**Replay transactions** from genesis to rebuild state.
-
-**Synonyms:** replay, rebuild
-**Not:** restore, load
+Creates new funds (authority-only).
 
 ---
 
-## Usage Guidelines
+### OpenMeter
+Creates a new meter for a service.
 
-1. **Use domain terms in code comments** and variable names
-2. **Avoid ambiguous synonyms** — prefer the primary term
-3. **Update this document** when new terms are introduced
-4. **Reference this document** in pull requests and documentation
+---
+
+### Consume
+Records usage and applies cost.
+
+---
+
+## State and Control
+
+### Active Meter
+A meter that accepts consumption.
+
+---
+
+### Nonce
+A per-account sequence number used for ordering and replay protection.
+
+---
+
+### Invariant
+A condition that must hold for all valid state transitions.
+
+---
+
+## Operations
+
+### Validate
+Checks whether a transaction satisfies all invariants.
+
+---
+
+### Apply
+Executes a valid transaction to produce a new state.
+
+---
+
+### Reconstruct
+Replays transactions from genesis to derive state.
+
+---
 
 ## References
-- Domain spec: `docs/domain_spec.md`
+- Domain specification: `docs/domain_spec.md`
 - Architecture: `docs/architecture.md`
