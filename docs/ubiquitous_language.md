@@ -21,6 +21,7 @@ A logical usage ledger for a specific service owned by an account.
 
 - Identity: `(owner, service_id)`
 - Tracks: total usage, spending, and locked deposit
+- Lifecycle: can be inactive, active, or closed
 - Not a physical device or sensor
 
 ---

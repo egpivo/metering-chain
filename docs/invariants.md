@@ -26,7 +26,8 @@ For each account, `nonce` must increase strictly by one per accepted transaction
 ### INV-3: Conservation of Value
 Total value is preserved across state transitions, except for explicit mint or burn operations.
 
-- Includes: account balances + locked deposits + recorded spend
+- Includes: account balances + locked deposits
+- Recorded spend is non-spendable accounting data
 - Violations indicate a logic error
 
 ---
@@ -111,14 +112,14 @@ Cost computation must not overflow.
 
 ## Data Integrity Invariants
 
-### INV-12: Monotonic Meter Totals
+### INV-15: Monotonic Meter Totals
 `meter.total_units` and `meter.total_spent` must never decrease.
 
 - Historical usage data is append-only
 
 ---
 
-### INV-13: Deterministic Transitions
+### INV-16: Deterministic Transitions
 Given the same initial state and transaction sequence, the resulting state must be identical.
 
 - No randomness

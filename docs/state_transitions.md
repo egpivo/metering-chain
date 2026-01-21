@@ -33,6 +33,7 @@ If validation fails, the transition is rejected and state remains unchanged.
 - `accounts[T.to].balance += T.amount`
 
 All other state remains unchanged.
+Mint increases total system value by `T.amount`.
 
 ---
 
@@ -95,6 +96,7 @@ fixed\_cost              & \text{if pricing = FixedCost}
 ### State Update
 - `meters[(T.owner, T.service_id)].active = false`
 - `accounts[T.owner].balance += meters[(T.owner, T.service_id)].locked_deposit`
+- `meters[(T.owner, T.service_id)].locked_deposit = 0`
 - `accounts[T.signer].nonce += 1`
 
 ---

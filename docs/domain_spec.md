@@ -28,10 +28,15 @@ Represents a usage ledger for a specific service owned by an account.
 - `(owner, service_id)`
 
 **State**
-- `total_units: u64`
-- `total_spent: u64`
-- `active: bool`
-- `locked_deposit: u64`
+- `total_units: u64` — cumulative usage
+- `total_spent: u64` — cumulative cost paid
+- `active: bool` — whether the meter accepts consumption
+- `locked_deposit: u64` — committed funds (refunded on closure)
+
+**Lifecycle States**
+- **Inactive**: meter exists but does not accept consumption; deposit may be locked
+- **Active**: meter accepts consumption transactions
+- **Closed**: meter was active but is now closed; deposit refunded
 
 **Invariants**
 - Only the owner may operate the meter
