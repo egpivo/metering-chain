@@ -4,6 +4,7 @@ pub mod apply;
 
 pub use account::Account;
 pub use meter::Meter;
+pub use apply::apply;
 
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
