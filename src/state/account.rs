@@ -32,8 +32,6 @@ impl Account {
     }
 
     /// Increment nonce (used after accepting a transaction)
-    ///
-    /// This enforces INV-2: Monotonic Nonce
     pub fn increment_nonce(&mut self) {
         self.nonce += 1;
     }
@@ -49,7 +47,6 @@ impl Account {
     /// Subtract from balance (e.g., for deposits or consumption)
     ///
     /// Returns Ok(new_balance) if sufficient funds, Err if insufficient
-    /// This enforces INV-1: No Negative Balances
     pub fn subtract_balance(&mut self, amount: u64) -> Result<u64, String> {
         if self.balance < amount {
             return Err(format!(
