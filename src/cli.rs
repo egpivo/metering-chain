@@ -67,9 +67,12 @@ pub enum Commands {
 pub fn load_or_create_state(storage: &FileStorage) -> Result<(State, u64)> {
     match storage.load_state()? {
         Some((state, last_tx_id)) => {
+            // Replay any transactions after the snapshot
             let txs = storage.load_txs_from(last_tx_id + 1)?;
             let mut current_state = state;
             let mut current_tx_id = last_tx_id;
+
+            // Get authorized minters (hardcoded for MVP)
             let minters = get_authorized_minters();
 
             for tx in txs {
@@ -121,6 +124,7 @@ fn format_output<T: serde::Serialize + std::fmt::Debug>(data: &T, format: &str) 
                 .map_err(|e| Error::StateError(format!("Failed to serialize JSON: {}", e)))
         }
         _ => {
+            // Human-readable format (simple debug output for now)
             Ok(format!("{:#?}", data))
         }
     }
@@ -140,6 +144,7 @@ pub fn run(cli: Cli) -> Result<()> {
 
     match cli.command {
         Commands::Init => {
+            // Create data directory
             fs::create_dir_all(config.get_data_dir())
                 .map_err(|e| Error::StateError(format!("Failed to create data directory: {}", e)))?;
             println!("Initialized data directory at: {}", config.get_data_dir().display());
@@ -147,14 +152,18 @@ pub fn run(cli: Cli) -> Result<()> {
         }
 
         Commands::Apply { tx, file, dry_run } => {
+            // Load current state
             let (mut state, mut last_tx_id) = load_or_create_state(&storage)?;
 
+            // Read transaction
             let tx_json = match tx {
                 Some(json) => json,
                 None => read_tx(file.as_deref())?,
             };
 
             let signed_tx = parse_tx(&tx_json)?;
+
+            // Validate transaction
             let cost_opt = metering_chain::tx::validation::validate(&state, &signed_tx, &minters)?;
 
             if dry_run {
@@ -165,9 +174,11 @@ pub fn run(cli: Cli) -> Result<()> {
                 return Ok(());
             }
 
+            // Apply transaction
             state = apply(&state, &signed_tx, &minters)?;
             last_tx_id += 1;
 
+            // Persist transaction and state
             storage.append_tx(&signed_tx)?;
             storage.persist_state(&state, last_tx_id)?;
 
@@ -227,6 +238,7 @@ pub fn run(cli: Cli) -> Result<()> {
             let (state, _) = load_or_create_state(&storage)?;
 
             let reports: Vec<ReportOutput> = if let Some(addr) = address {
+                // Single account report
                 state
                     .get_owner_meters(&addr)
                     .iter()
@@ -244,6 +256,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     })
                     .collect()
             } else {
+                // All accounts report - iterate through all accounts and their meters
                 let mut all_reports = Vec::new();
                 for account_addr in state.accounts.keys() {
                     for meter in state.get_owner_meters(account_addr) {

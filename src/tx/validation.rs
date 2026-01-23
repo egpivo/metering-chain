@@ -2,10 +2,6 @@ use crate::state::State;
 use crate::tx::{SignedTx, Transaction, Pricing};
 use crate::error::{Error, Result};
 
-/// Compute cost from units and pricing model
-///
-/// Returns Ok(cost) if computation succeeds, Err if overflow occurs.
-/// This enforces INV-14: Overflow Protection
 pub fn compute_cost(units: u64, pricing: &Pricing) -> Result<u64> {
     match pricing {
         Pricing::UnitPrice(unit_price) => {
@@ -22,12 +18,6 @@ pub fn compute_cost(units: u64, pricing: &Pricing) -> Result<u64> {
     }
 }
 
-/// Validate a Mint transaction
-///
-/// Checks:
-/// - INV-8: Mint Authorization (signer ∈ authorized_minters)
-/// - amount > 0
-/// - to account exists or can be created
 pub fn validate_mint(
     _state: &State,
     tx: &SignedTx,
@@ -52,25 +42,19 @@ pub fn validate_mint(
     Ok(())
 }
 
-/// Validate an OpenMeter transaction
-///
-/// Checks:
-/// - INV-4: Ownership Authorization (signer == owner)
-/// - INV-9: Nonce Monotonicity (accounts[signer].nonce == tx.nonce)
-/// - INV-10: Sufficient Balance for Deposits
-/// - INV-5: Meter Uniqueness (no active meter exists)
-/// - deposit > 0
 pub fn validate_open_meter(state: &State, tx: &SignedTx) -> Result<()> {
     let Transaction::OpenMeter { owner, service_id, deposit } = &tx.kind else {
         return Err(Error::InvalidTransaction("Expected OpenMeter transaction".to_string()));
     };
 
+    // INV-4: Ownership Authorization
     if tx.signer != *owner {
         return Err(Error::InvalidTransaction(
             format!("Signer {} does not match owner {}", tx.signer, owner)
         ));
     }
 
+    // INV-9: Nonce Monotonicity
     let account = state.get_account(&tx.signer)
         .ok_or_else(|| Error::InvalidTransaction(
             format!("Account {} does not exist", tx.signer)
@@ -86,12 +70,14 @@ pub fn validate_open_meter(state: &State, tx: &SignedTx) -> Result<()> {
         ));
     }
 
+    // deposit > 0
     if *deposit == 0 {
         return Err(Error::InvalidTransaction(
             "Deposit must be greater than zero".to_string()
         ));
     }
 
+    // INV-10: Sufficient Balance for Deposits
     if !account.has_sufficient_balance(*deposit) {
         return Err(Error::InvalidTransaction(
             format!(
@@ -102,6 +88,7 @@ pub fn validate_open_meter(state: &State, tx: &SignedTx) -> Result<()> {
         ));
     }
 
+    // INV-5: Meter Uniqueness (no active meter exists)
     if state.has_active_meter(owner, service_id) {
         return Err(Error::InvalidTransaction(
             format!(
@@ -129,12 +116,14 @@ pub fn validate_consume(state: &State, tx: &SignedTx) -> Result<u64> {
         return Err(Error::InvalidTransaction("Expected Consume transaction".to_string()));
     };
 
+    // INV-4: Ownership Authorization
     if tx.signer != *owner {
         return Err(Error::InvalidTransaction(
             format!("Signer {} does not match owner {}", tx.signer, owner)
         ));
     }
 
+    // INV-9: Nonce Monotonicity
     let account = state.get_account(&tx.signer)
         .ok_or_else(|| Error::InvalidTransaction(
             format!("Account {} does not exist", tx.signer)
@@ -150,6 +139,7 @@ pub fn validate_consume(state: &State, tx: &SignedTx) -> Result<u64> {
         ));
     }
 
+    // INV-6: Active Meter Requirement
     let meter = state.get_meter(owner, service_id)
         .ok_or_else(|| Error::InvalidTransaction(
             format!(
@@ -167,12 +157,14 @@ pub fn validate_consume(state: &State, tx: &SignedTx) -> Result<u64> {
         ));
     }
 
+    // INV-13: Positive Units
     if *units == 0 {
         return Err(Error::InvalidTransaction(
             "Units must be greater than zero".to_string()
         ));
     }
 
+    // INV-12: Valid Pricing
     match pricing {
         Pricing::UnitPrice(price) => {
             if *price == 0 {
@@ -190,8 +182,10 @@ pub fn validate_consume(state: &State, tx: &SignedTx) -> Result<u64> {
         }
     }
 
+    // INV-14: Overflow Protection + compute cost
     let cost = compute_cost(*units, pricing)?;
 
+    // INV-11: Sufficient Balance for Consumption
     if !account.has_sufficient_balance(cost) {
         return Err(Error::InvalidTransaction(
             format!(
@@ -216,12 +210,14 @@ pub fn validate_close_meter(state: &State, tx: &SignedTx) -> Result<()> {
         return Err(Error::InvalidTransaction("Expected CloseMeter transaction".to_string()));
     };
 
+    // INV-4: Ownership Authorization
     if tx.signer != *owner {
         return Err(Error::InvalidTransaction(
             format!("Signer {} does not match owner {}", tx.signer, owner)
         ));
     }
 
+    // INV-9: Nonce Monotonicity
     let account = state.get_account(&tx.signer)
         .ok_or_else(|| Error::InvalidTransaction(
             format!("Account {} does not exist", tx.signer)
@@ -237,6 +233,7 @@ pub fn validate_close_meter(state: &State, tx: &SignedTx) -> Result<()> {
         ));
     }
 
+    // INV-6: Active Meter Requirement
     let meter = state.get_meter(owner, service_id)
         .ok_or_else(|| Error::InvalidTransaction(
             format!(

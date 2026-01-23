@@ -15,7 +15,6 @@ pub struct Account {
 }
 
 impl Account {
-    /// Create a new account with zero balance and nonce
     pub fn new() -> Self {
         Account {
             balance: 0,
@@ -23,7 +22,6 @@ impl Account {
         }
     }
 
-    /// Create an account with initial balance
     pub fn with_balance(balance: u64) -> Self {
         Account {
             balance,
@@ -31,22 +29,15 @@ impl Account {
         }
     }
 
-    /// Increment nonce (used after accepting a transaction)
     pub fn increment_nonce(&mut self) {
         self.nonce += 1;
     }
 
-    /// Add to balance (e.g., from Mint or CloseMeter deposit return)
-    ///
-    /// Returns the new balance
     pub fn add_balance(&mut self, amount: u64) -> u64 {
         self.balance = self.balance.saturating_add(amount);
         self.balance
     }
 
-    /// Subtract from balance (e.g., for deposits or consumption)
-    ///
-    /// Returns Ok(new_balance) if sufficient funds, Err if insufficient
     pub fn subtract_balance(&mut self, amount: u64) -> Result<u64, String> {
         if self.balance < amount {
             return Err(format!(
@@ -58,17 +49,14 @@ impl Account {
         Ok(self.balance)
     }
 
-    /// Check if account has sufficient balance
     pub fn has_sufficient_balance(&self, amount: u64) -> bool {
         self.balance >= amount
     }
 
-    /// Get current balance
     pub fn balance(&self) -> u64 {
         self.balance
     }
 
-    /// Get current nonce
     pub fn nonce(&self) -> u64 {
         self.nonce
     }

@@ -31,7 +31,6 @@ pub struct Meter {
 }
 
 impl Meter {
-    /// Create a new active meter with zero totals
     pub fn new(owner: String, service_id: String, deposit: u64) -> Self {
         Meter {
             owner,
@@ -43,7 +42,6 @@ impl Meter {
         }
     }
 
-    /// Create an inactive meter (for reopening scenarios)
     pub fn inactive(owner: String, service_id: String, total_units: u64, total_spent: u64) -> Self {
         Meter {
             owner,
@@ -55,18 +53,11 @@ impl Meter {
         }
     }
 
-    /// Reactivate a meter and set a new deposit
-    ///
-    /// Preserves historical totals (total_units, total_spent)
     pub fn reactivate(&mut self, deposit: u64) {
         self.active = true;
         self.locked_deposit = deposit;
     }
 
-    /// Close the meter and return locked deposit
-    ///
-    /// Returns the locked deposit amount.
-    /// This implements the lifecycle transition: Active → Inactive
     pub fn close(&mut self) -> u64 {
         self.active = false;
         let deposit = self.locked_deposit;
@@ -74,36 +65,27 @@ impl Meter {
         deposit
     }
 
-    /// Record consumption: increment units and spent amount
-    ///
-    /// This enforces INV-15: Monotonic Meter Totals
-    /// Both total_units and total_spent must only increase.
     pub fn record_consumption(&mut self, units: u64, cost: u64) {
         self.total_units = self.total_units.saturating_add(units);
         self.total_spent = self.total_spent.saturating_add(cost);
     }
 
-    /// Check if meter is active
     pub fn is_active(&self) -> bool {
         self.active
     }
 
-    /// Get the meter's identity as (owner, service_id)
     pub fn identity(&self) -> (&str, &str) {
         (&self.owner, &self.service_id)
     }
 
-    /// Get total units consumed
     pub fn total_units(&self) -> u64 {
         self.total_units
     }
 
-    /// Get total amount spent
     pub fn total_spent(&self) -> u64 {
         self.total_spent
     }
 
-    /// Get locked deposit
     pub fn locked_deposit(&self) -> u64 {
         self.locked_deposit
     }
