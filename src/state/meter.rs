@@ -1,1 +1,162 @@
-// Meter state management
+use serde::{Deserialize, Serialize};
+
+/// Meter aggregate: represents a usage ledger for a specific service owned by an account.
+///
+/// Identity: `(owner, service_id)`
+///
+/// Invariants:
+/// - Only the owner may operate the meter
+/// - At most one active meter per `(owner, service_id)`
+/// - `total_units` and `total_spent` are monotonic
+/// - `locked_deposit` represents committed funds
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Meter {
+    /// Account that owns this meter
+    pub owner: String,
+    
+    /// Service identifier (e.g., "storage", "api_calls")
+    pub service_id: String,
+    
+    /// Cumulative usage units
+    pub total_units: u64,
+    
+    /// Cumulative cost paid
+    pub total_spent: u64,
+    
+    /// Whether the meter accepts consumption
+    pub active: bool,
+    
+    /// Committed funds (refunded on closure)
+    pub locked_deposit: u64,
+}
+
+impl Meter {
+    /// Create a new active meter with zero totals
+    pub fn new(owner: String, service_id: String, deposit: u64) -> Self {
+        Meter {
+            owner,
+            service_id,
+            total_units: 0,
+            total_spent: 0,
+            active: true,
+            locked_deposit: deposit,
+        }
+    }
+
+    /// Create an inactive meter (for reopening scenarios)
+    pub fn inactive(owner: String, service_id: String, total_units: u64, total_spent: u64) -> Self {
+        Meter {
+            owner,
+            service_id,
+            total_units,
+            total_spent,
+            active: false,
+            locked_deposit: 0,
+        }
+    }
+
+    /// Reactivate a meter and set a new deposit
+    ///
+    /// Preserves historical totals (total_units, total_spent)
+    pub fn reactivate(&mut self, deposit: u64) {
+        self.active = true;
+        self.locked_deposit = deposit;
+    }
+
+    /// Close the meter and return locked deposit
+    ///
+    /// Returns the locked deposit amount.
+    /// This implements the lifecycle transition: Active → Inactive
+    pub fn close(&mut self) -> u64 {
+        self.active = false;
+        let deposit = self.locked_deposit;
+        self.locked_deposit = 0;
+        deposit
+    }
+
+    /// Record consumption: increment units and spent amount
+    ///
+    /// This enforces INV-15: Monotonic Meter Totals
+    /// Both total_units and total_spent must only increase.
+    pub fn record_consumption(&mut self, units: u64, cost: u64) {
+        self.total_units = self.total_units.saturating_add(units);
+        self.total_spent = self.total_spent.saturating_add(cost);
+    }
+
+    /// Check if meter is active
+    pub fn is_active(&self) -> bool {
+        self.active
+    }
+
+    /// Get the meter's identity as (owner, service_id)
+    pub fn identity(&self) -> (&str, &str) {
+        (&self.owner, &self.service_id)
+    }
+
+    /// Get total units consumed
+    pub fn total_units(&self) -> u64 {
+        self.total_units
+    }
+
+    /// Get total amount spent
+    pub fn total_spent(&self) -> u64 {
+        self.total_spent
+    }
+
+    /// Get locked deposit
+    pub fn locked_deposit(&self) -> u64 {
+        self.locked_deposit
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_meter_creation() {
+        let meter = Meter::new("alice".to_string(), "storage".to_string(), 100);
+        assert_eq!(meter.owner, "alice");
+        assert_eq!(meter.service_id, "storage");
+        assert_eq!(meter.total_units, 0);
+        assert_eq!(meter.total_spent, 0);
+        assert!(meter.active);
+        assert_eq!(meter.locked_deposit, 100);
+    }
+
+    #[test]
+    fn test_meter_close() {
+        let mut meter = Meter::new("alice".to_string(), "storage".to_string(), 100);
+        let deposit = meter.close();
+        assert_eq!(deposit, 100);
+        assert!(!meter.active);
+        assert_eq!(meter.locked_deposit, 0);
+    }
+
+    #[test]
+    fn test_meter_reactivate() {
+        let mut meter = Meter::inactive(
+            "alice".to_string(),
+            "storage".to_string(),
+            50,
+            200,
+        );
+        meter.reactivate(150);
+        assert!(meter.active);
+        assert_eq!(meter.locked_deposit, 150);
+        assert_eq!(meter.total_units, 50); // Preserved
+        assert_eq!(meter.total_spent, 200); // Preserved
+    }
+
+    #[test]
+    fn test_record_consumption() {
+        let mut meter = Meter::new("alice".to_string(), "storage".to_string(), 100);
+        meter.record_consumption(10, 50);
+        assert_eq!(meter.total_units, 10);
+        assert_eq!(meter.total_spent, 50);
+        
+        meter.record_consumption(5, 25);
+        assert_eq!(meter.total_units, 15);
+        assert_eq!(meter.total_spent, 75);
+    }
+}
