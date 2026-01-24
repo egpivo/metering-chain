@@ -21,17 +21,30 @@ fn create_test_storage() -> (FileStorage, TempDir) {
 
 fn load_or_replay_state(storage: &FileStorage) -> (State, u64) {
     let minters = get_authorized_minters();
-    let all_txs = storage.load_txs_from(0).unwrap();
-    let mut current_state = match storage.load_state().unwrap() {
-        Some((state, _last_tx_id)) => state,
-        None => State::new(),
-    };
-    let mut current_tx_id = 0u64;
-    for tx in all_txs {
-        current_state = apply(&current_state, &tx, &minters).unwrap();
-        current_tx_id += 1;
+    match storage.load_state().unwrap() {
+        Some((snapshot_state, snapshot_tx_id)) => {
+            // Load transactions after snapshot
+            let txs_after_snapshot = storage.load_txs_from(snapshot_tx_id).unwrap();
+            let mut current_state = snapshot_state;
+            let mut current_tx_id = snapshot_tx_id;
+            for tx in txs_after_snapshot {
+                current_state = apply(&current_state, &tx, &minters).unwrap();
+                current_tx_id += 1;
+            }
+            (current_state, current_tx_id)
+        }
+        None => {
+            // No snapshot, replay all transactions from log
+            let all_txs = storage.load_txs_from(0).unwrap();
+            let mut current_state = State::new();
+            let mut current_tx_id = 0u64;
+            for tx in all_txs {
+                current_state = apply(&current_state, &tx, &minters).unwrap();
+                current_tx_id += 1;
+            }
+            (current_state, current_tx_id)
+        }
     }
-    (current_state, current_tx_id)
 }
 
 /// Test the complete happy path: Mint → OpenMeter → Consume → CloseMeter
