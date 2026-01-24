@@ -1,9 +1,9 @@
 use clap::{Parser, Subcommand};
 use metering_chain::config::Config;
-use metering_chain::storage::{Storage, FileStorage};
-use metering_chain::state::{State, apply};
-use metering_chain::tx::SignedTx;
 use metering_chain::error::{Error, Result};
+use metering_chain::state::{apply, State};
+use metering_chain::storage::{FileStorage, Storage};
+use metering_chain::tx::SignedTx;
 use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Read};
@@ -95,22 +95,22 @@ fn get_authorized_minters() -> HashSet<String> {
 
 /// Parse transaction from JSON string
 fn parse_tx(json: &str) -> Result<SignedTx> {
-    let tx: SignedTx = serde_json::from_str(json)
-        .map_err(|e| Error::InvalidTransaction(format!("Failed to parse transaction JSON: {}", e)))?;
+    let tx: SignedTx = serde_json::from_str(json).map_err(|e| {
+        Error::InvalidTransaction(format!("Failed to parse transaction JSON: {}", e))
+    })?;
     Ok(tx)
 }
 
 /// Read transaction from file or stdin
 fn read_tx(file: Option<&str>) -> Result<String> {
     match file {
-        Some(path) => {
-            fs::read_to_string(path)
-                .map_err(|e| Error::InvalidTransaction(format!("Failed to read file {}: {}", path, e)))
-        }
+        Some(path) => fs::read_to_string(path)
+            .map_err(|e| Error::InvalidTransaction(format!("Failed to read file {}: {}", path, e))),
         None => {
             let mut buffer = String::new();
-            io::stdin().read_to_string(&mut buffer)
-                .map_err(|e| Error::InvalidTransaction(format!("Failed to read from stdin: {}", e)))?;
+            io::stdin().read_to_string(&mut buffer).map_err(|e| {
+                Error::InvalidTransaction(format!("Failed to read from stdin: {}", e))
+            })?;
             Ok(buffer)
         }
     }
@@ -119,10 +119,8 @@ fn read_tx(file: Option<&str>) -> Result<String> {
 /// Format output based on format type
 fn format_output<T: serde::Serialize + std::fmt::Debug>(data: &T, format: &str) -> Result<String> {
     match format {
-        "json" => {
-            serde_json::to_string_pretty(data)
-                .map_err(|e| Error::StateError(format!("Failed to serialize JSON: {}", e)))
-        }
+        "json" => serde_json::to_string_pretty(data)
+            .map_err(|e| Error::StateError(format!("Failed to serialize JSON: {}", e))),
         _ => {
             // Human-readable format (simple debug output for now)
             Ok(format!("{:#?}", data))
@@ -145,9 +143,13 @@ pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Init => {
             // Create data directory
-            fs::create_dir_all(config.get_data_dir())
-                .map_err(|e| Error::StateError(format!("Failed to create data directory: {}", e)))?;
-            println!("Initialized data directory at: {}", config.get_data_dir().display());
+            fs::create_dir_all(config.get_data_dir()).map_err(|e| {
+                Error::StateError(format!("Failed to create data directory: {}", e))
+            })?;
+            println!(
+                "Initialized data directory at: {}",
+                config.get_data_dir().display()
+            );
             Ok(())
         }
 
@@ -203,9 +205,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     println!("{}", format_output(&output, &cli.format)?);
                     Ok(())
                 }
-                None => {
-                    Err(Error::StateError(format!("Account {} not found", address)))
-                }
+                None => Err(Error::StateError(format!("Account {} not found", address))),
             }
         }
 

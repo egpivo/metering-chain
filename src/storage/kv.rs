@@ -1,12 +1,12 @@
-use crate::storage::Storage;
-use crate::state::State;
-use crate::tx::SignedTx;
-use crate::error::{Error, Result};
 use crate::config::Config;
-use std::fs::{File, OpenOptions};
-use std::io::{Read, Write, BufReader};
-use std::path::PathBuf;
+use crate::error::{Error, Result};
+use crate::state::State;
+use crate::storage::Storage;
+use crate::tx::SignedTx;
 use std::fs;
+use std::fs::{File, OpenOptions};
+use std::io::{BufReader, Read, Write};
+use std::path::PathBuf;
 
 /// File-based storage implementation using append-only logs and snapshots.
 ///
@@ -43,12 +43,12 @@ impl FileStorage {
     /// Ensure the data directory exists
     fn ensure_dir(&self) -> Result<()> {
         if let Some(parent) = self.tx_log_path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| Error::StateError(format!("Failed to create data directory: {}", e)))?;
+            fs::create_dir_all(parent).map_err(|e| {
+                Error::StateError(format!("Failed to create data directory: {}", e))
+            })?;
         }
         Ok(())
     }
-
 }
 
 impl Storage for FileStorage {
@@ -93,8 +93,14 @@ impl Storage for FileStorage {
 
         let last_tx_id_bytes = &data[data.len() - 8..];
         let last_tx_id = u64::from_le_bytes([
-            last_tx_id_bytes[0], last_tx_id_bytes[1], last_tx_id_bytes[2], last_tx_id_bytes[3],
-            last_tx_id_bytes[4], last_tx_id_bytes[5], last_tx_id_bytes[6], last_tx_id_bytes[7],
+            last_tx_id_bytes[0],
+            last_tx_id_bytes[1],
+            last_tx_id_bytes[2],
+            last_tx_id_bytes[3],
+            last_tx_id_bytes[4],
+            last_tx_id_bytes[5],
+            last_tx_id_bytes[6],
+            last_tx_id_bytes[7],
         ]);
 
         let state_bytes = &data[..data.len() - 8];
@@ -126,10 +132,12 @@ impl Storage for FileStorage {
             .map_err(|e| Error::StateError(format!("Failed to rename temp state file: {}", e)))?;
 
         if let Some(parent) = self.state_path.parent() {
-            let parent_file = File::open(parent)
-                .map_err(|e| Error::StateError(format!("Failed to open parent directory: {}", e)))?;
-            parent_file.sync_all()
-                .map_err(|e| Error::StateError(format!("Failed to fsync parent directory: {}", e)))?;
+            let parent_file = File::open(parent).map_err(|e| {
+                Error::StateError(format!("Failed to open parent directory: {}", e))
+            })?;
+            parent_file.sync_all().map_err(|e| {
+                Error::StateError(format!("Failed to fsync parent directory: {}", e))
+            })?;
         }
 
         Ok(())
@@ -153,12 +161,14 @@ impl Storage for FileStorage {
                 Ok(_) => {
                     let len = u64::from_le_bytes(len_buf) as usize;
                     let mut tx_buf = vec![0u8; len];
-                    reader.read_exact(&mut tx_buf)
+                    reader
+                        .read_exact(&mut tx_buf)
                         .map_err(|e| Error::StateError(format!("Failed to read tx data: {}", e)))?;
 
                     if current_id >= from_tx_id {
-                        let tx: SignedTx = bincode::deserialize(&tx_buf)
-                            .map_err(|e| Error::StateError(format!("Failed to deserialize tx: {}", e)))?;
+                        let tx: SignedTx = bincode::deserialize(&tx_buf).map_err(|e| {
+                            Error::StateError(format!("Failed to deserialize tx: {}", e))
+                        })?;
                         transactions.push(tx);
                     }
 
@@ -181,7 +191,7 @@ impl Storage for FileStorage {
 mod tests {
     use super::*;
     use crate::state::State;
-    use crate::tx::{Transaction, SignedTx};
+    use crate::tx::{SignedTx, Transaction};
     use tempfile::TempDir;
 
     fn create_test_storage() -> (FileStorage, TempDir) {
@@ -238,7 +248,10 @@ mod tests {
         let (mut storage, _temp_dir) = create_test_storage();
 
         let mut state = State::new();
-        state.accounts.insert("alice".to_string(), crate::state::Account::with_balance(1000));
+        state.accounts.insert(
+            "alice".to_string(),
+            crate::state::Account::with_balance(1000),
+        );
 
         storage.persist_state(&state, 5).unwrap();
 

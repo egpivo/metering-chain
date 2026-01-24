@@ -1,12 +1,12 @@
 pub mod chain;
-pub mod tx;
-pub mod state;
-pub mod storage;
+pub mod config;
 pub mod error;
 pub mod logger;
-pub mod config;
+pub mod state;
+pub mod storage;
+pub mod tx;
 
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 
 /// Get current Unix timestamp
 pub fn current_timestamp() -> i64 {

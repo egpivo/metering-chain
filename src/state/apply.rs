@@ -1,24 +1,29 @@
-use crate::state::{State, MeterKey};
-use crate::tx::{SignedTx, Transaction};
-use crate::tx::validation::validate;
 use crate::error::{Error, Result};
+use crate::state::{MeterKey, State};
+use crate::tx::validation::validate;
+use crate::tx::{SignedTx, Transaction};
 use std::collections::HashSet;
 
-pub fn apply(
-    state: &State,
-    tx: &SignedTx,
-    authorized_minters: &HashSet<String>,
-) -> Result<State> {
+pub fn apply(state: &State, tx: &SignedTx, authorized_minters: &HashSet<String>) -> Result<State> {
     let cost_opt = validate(state, tx, authorized_minters)?;
     let mut new_state = state.clone();
     match &tx.kind {
         Transaction::Mint { to, amount } => {
             apply_mint(&mut new_state, to, *amount)?;
         }
-        Transaction::OpenMeter { owner, service_id, deposit } => {
+        Transaction::OpenMeter {
+            owner,
+            service_id,
+            deposit,
+        } => {
             apply_open_meter(&mut new_state, owner, service_id, *deposit, &tx.signer)?;
         }
-        Transaction::Consume { owner, service_id, units, pricing: _ } => {
+        Transaction::Consume {
+            owner,
+            service_id,
+            units,
+            pricing: _,
+        } => {
             let cost = cost_opt.expect("validate_consume should return cost");
             apply_consume(&mut new_state, owner, service_id, *units, cost, &tx.signer)?;
         }
@@ -49,20 +54,24 @@ fn apply_open_meter(
         if !meter.is_active() {
             meter.reactivate(deposit);
         } else {
-            return Err(Error::StateError(
-                format!("Active meter already exists for {}:{}", owner, service_id)
-            ));
+            return Err(Error::StateError(format!(
+                "Active meter already exists for {}:{}",
+                owner, service_id
+            )));
         }
     } else {
         let meter = crate::state::Meter::new(owner.to_string(), service_id.to_string(), deposit);
         state.insert_meter(meter);
     }
 
-    let account = state.get_account_mut(owner)
+    let account = state
+        .get_account_mut(owner)
         .ok_or_else(|| Error::StateError(format!("Account {} not found", owner)))?;
-    account.subtract_balance(deposit)
-        .map_err(|e| Error::StateError(e))?;
-    let signer_account = state.get_account_mut(signer)
+    account
+        .subtract_balance(deposit)
+        .map_err(Error::StateError)?;
+    let signer_account = state
+        .get_account_mut(signer)
         .ok_or_else(|| Error::StateError(format!("Account {} not found", signer)))?;
     signer_account.increment_nonce();
 
@@ -77,39 +86,35 @@ fn apply_consume(
     cost: u64,
     signer: &str,
 ) -> Result<()> {
-    let meter = state.get_meter_mut(owner, service_id)
-        .ok_or_else(|| Error::StateError(
-            format!("Meter not found for {}:{}", owner, service_id)
-        ))?;
+    let meter = state.get_meter_mut(owner, service_id).ok_or_else(|| {
+        Error::StateError(format!("Meter not found for {}:{}", owner, service_id))
+    })?;
     meter.record_consumption(units, cost);
 
-    let account = state.get_account_mut(owner)
+    let account = state
+        .get_account_mut(owner)
         .ok_or_else(|| Error::StateError(format!("Account {} not found", owner)))?;
-    account.subtract_balance(cost)
-        .map_err(|e| Error::StateError(e))?;
-    let signer_account = state.get_account_mut(signer)
+    account.subtract_balance(cost).map_err(Error::StateError)?;
+    let signer_account = state
+        .get_account_mut(signer)
         .ok_or_else(|| Error::StateError(format!("Account {} not found", signer)))?;
     signer_account.increment_nonce();
 
     Ok(())
 }
 
-fn apply_close_meter(
-    state: &mut State,
-    owner: &str,
-    service_id: &str,
-    signer: &str,
-) -> Result<()> {
-    let meter = state.get_meter_mut(owner, service_id)
-        .ok_or_else(|| Error::StateError(
-            format!("Meter not found for {}:{}", owner, service_id)
-        ))?;
+fn apply_close_meter(state: &mut State, owner: &str, service_id: &str, signer: &str) -> Result<()> {
+    let meter = state.get_meter_mut(owner, service_id).ok_or_else(|| {
+        Error::StateError(format!("Meter not found for {}:{}", owner, service_id))
+    })?;
     let deposit = meter.close();
 
-    let account = state.get_account_mut(owner)
+    let account = state
+        .get_account_mut(owner)
         .ok_or_else(|| Error::StateError(format!("Account {} not found", owner)))?;
     account.add_balance(deposit);
-    let signer_account = state.get_account_mut(signer)
+    let signer_account = state
+        .get_account_mut(signer)
         .ok_or_else(|| Error::StateError(format!("Account {} not found", signer)))?;
     signer_account.increment_nonce();
 
@@ -149,7 +154,9 @@ mod tests {
     #[test]
     fn test_apply_open_meter() {
         let mut state = State::new();
-        state.accounts.insert("alice".to_string(), Account::with_balance(1000));
+        state
+            .accounts
+            .insert("alice".to_string(), Account::with_balance(1000));
         let minters = create_authorized_minters();
 
         let tx = SignedTx::new(
@@ -163,7 +170,7 @@ mod tests {
         );
 
         let new_state = apply(&state, &tx, &minters).unwrap();
-        
+
         // Check account balance decreased
         let account = new_state.get_account("alice").unwrap();
         assert_eq!(account.balance(), 900);
@@ -180,8 +187,10 @@ mod tests {
     #[test]
     fn test_apply_open_meter_reactivate() {
         let mut state = State::new();
-        state.accounts.insert("alice".to_string(), Account::with_balance(1000));
-        
+        state
+            .accounts
+            .insert("alice".to_string(), Account::with_balance(1000));
+
         // Create inactive meter
         let mut meter = Meter::new("alice".to_string(), "storage".to_string(), 50);
         meter.record_consumption(10, 25);
@@ -200,7 +209,7 @@ mod tests {
         );
 
         let new_state = apply(&state, &tx, &minters).unwrap();
-        
+
         // Check meter reactivated with preserved totals
         let meter = new_state.get_meter("alice", "storage").unwrap();
         assert!(meter.is_active());
@@ -212,7 +221,9 @@ mod tests {
     #[test]
     fn test_apply_consume() {
         let mut state = State::new();
-        state.accounts.insert("alice".to_string(), Account::with_balance(1000));
+        state
+            .accounts
+            .insert("alice".to_string(), Account::with_balance(1000));
         let meter = Meter::new("alice".to_string(), "storage".to_string(), 100);
         state.insert_meter(meter);
 
@@ -229,7 +240,7 @@ mod tests {
         );
 
         let new_state = apply(&state, &tx, &minters).unwrap();
-        
+
         // Check account balance decreased
         let account = new_state.get_account("alice").unwrap();
         assert_eq!(account.balance(), 950); // 1000 - 50
@@ -244,7 +255,9 @@ mod tests {
     #[test]
     fn test_apply_close_meter() {
         let mut state = State::new();
-        state.accounts.insert("alice".to_string(), Account::with_balance(1000));
+        state
+            .accounts
+            .insert("alice".to_string(), Account::with_balance(1000));
         let meter = Meter::new("alice".to_string(), "storage".to_string(), 100);
         state.insert_meter(meter);
 
@@ -259,7 +272,7 @@ mod tests {
         );
 
         let new_state = apply(&state, &tx, &minters).unwrap();
-        
+
         // Check account balance increased (deposit returned)
         let account = new_state.get_account("alice").unwrap();
         assert_eq!(account.balance(), 1100); // 1000 + 100
@@ -275,7 +288,7 @@ mod tests {
     fn test_apply_invalid_transaction() {
         let state = State::new();
         let minters = create_authorized_minters();
-        
+
         // Try to mint with unauthorized signer
         let tx = SignedTx::new(
             "alice".to_string(),
@@ -333,7 +346,10 @@ mod tests {
         );
         state = apply(&state, &tx3, &minters).unwrap();
         assert_eq!(state.get_account("alice").unwrap().balance(), 850);
-        assert_eq!(state.get_meter("alice", "storage").unwrap().total_units(), 10);
+        assert_eq!(
+            state.get_meter("alice", "storage").unwrap().total_units(),
+            10
+        );
 
         // 4. Close meter
         let tx4 = SignedTx::new(

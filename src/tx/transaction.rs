@@ -13,10 +13,7 @@ pub enum Pricing {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Transaction {
     /// Create new funds (authority-only)
-    Mint {
-        to: String,
-        amount: u64,
-    },
+    Mint { to: String, amount: u64 },
     /// Create a new meter for a service
     OpenMeter {
         owner: String,
@@ -31,10 +28,7 @@ pub enum Transaction {
         pricing: Pricing,
     },
     /// Close a meter and return locked deposit
-    CloseMeter {
-        owner: String,
-        service_id: String,
-    },
+    CloseMeter { owner: String, service_id: String },
 }
 
 /// Signed transaction wrapper with signer and nonce
@@ -49,6 +43,10 @@ pub struct SignedTx {
 
 impl SignedTx {
     pub fn new(signer: String, nonce: u64, kind: Transaction) -> Self {
-        SignedTx { signer, nonce, kind }
+        SignedTx {
+            signer,
+            nonce,
+            kind,
+        }
     }
 }

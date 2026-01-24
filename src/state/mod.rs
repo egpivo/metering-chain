@@ -1,13 +1,13 @@
 pub mod account;
-pub mod meter;
 pub mod apply;
+pub mod meter;
 
 pub use account::Account;
-pub use meter::Meter;
 pub use apply::apply;
+pub use meter::Meter;
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Meter key: composite key for identifying meters by (owner, service_id)
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,7 +30,7 @@ impl MeterKey {
 pub struct State {
     /// All accounts indexed by account address/identifier
     pub accounts: HashMap<String, Account>,
-    
+
     /// All meters indexed by (owner, service_id)
     pub meters: HashMap<MeterKey, Meter>,
 }
@@ -46,9 +46,7 @@ impl State {
 
     /// Get or create an account (returns mutable reference)
     pub fn get_or_create_account(&mut self, address: &str) -> &mut Account {
-        self.accounts
-            .entry(address.to_string())
-            .or_insert_with(Account::new)
+        self.accounts.entry(address.to_string()).or_default()
     }
 
     /// Get account (returns Option)
@@ -92,10 +90,7 @@ impl State {
 
     /// Get all meters for a given owner
     pub fn get_owner_meters(&self, owner: &str) -> Vec<&Meter> {
-        self.meters
-            .values()
-            .filter(|m| m.owner == owner)
-            .collect()
+        self.meters.values().filter(|m| m.owner == owner).collect()
     }
 
     /// Get all active meters for a given owner
@@ -137,7 +132,7 @@ mod tests {
         let mut state = State::new();
         let meter = Meter::new("alice".to_string(), "storage".to_string(), 100);
         state.insert_meter(meter);
-        
+
         let retrieved = state.get_meter("alice", "storage");
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().service_id, "storage");
@@ -148,7 +143,7 @@ mod tests {
         let mut state = State::new();
         let meter = Meter::new("alice".to_string(), "storage".to_string(), 100);
         state.insert_meter(meter);
-        
+
         assert!(state.has_active_meter("alice", "storage"));
         assert!(!state.has_active_meter("alice", "api_calls"));
         assert!(!state.has_active_meter("bob", "storage"));
@@ -160,7 +155,7 @@ mod tests {
         let mut meter = Meter::new("alice".to_string(), "storage".to_string(), 100);
         meter.close();
         state.insert_meter(meter);
-        
+
         assert!(!state.has_active_meter("alice", "storage"));
     }
 }

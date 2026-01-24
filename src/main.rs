@@ -5,7 +5,7 @@ use cli::Cli;
 
 fn main() {
     let cli = Cli::parse();
-    
+
     match cli::run(cli) {
         Ok(()) => {}
         Err(e) => {

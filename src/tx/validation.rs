@@ -1,20 +1,19 @@
-use crate::state::State;
-use crate::tx::{SignedTx, Transaction, Pricing};
 use crate::error::{Error, Result};
+use crate::state::State;
+use crate::tx::{Pricing, SignedTx, Transaction};
 
 pub fn compute_cost(units: u64, pricing: &Pricing) -> Result<u64> {
     match pricing {
         Pricing::UnitPrice(unit_price) => {
-            let cost = units
-                .checked_mul(*unit_price)
-                .ok_or_else(|| Error::InvalidTransaction(
-                    format!("Cost computation overflow: {} units × {} price", units, unit_price)
-                ))?;
+            let cost = units.checked_mul(*unit_price).ok_or_else(|| {
+                Error::InvalidTransaction(format!(
+                    "Cost computation overflow: {} units × {} price",
+                    units, unit_price
+                ))
+            })?;
             Ok(cost)
         }
-        Pricing::FixedCost(cost) => {
-            Ok(*cost)
-        }
+        Pricing::FixedCost(cost) => Ok(*cost),
     }
 }
 
@@ -24,18 +23,21 @@ pub fn validate_mint(
     authorized_minters: &std::collections::HashSet<String>,
 ) -> Result<()> {
     let Transaction::Mint { to: _to, amount } = &tx.kind else {
-        return Err(Error::InvalidTransaction("Expected Mint transaction".to_string()));
+        return Err(Error::InvalidTransaction(
+            "Expected Mint transaction".to_string(),
+        ));
     };
 
     if !authorized_minters.contains(&tx.signer) {
-        return Err(Error::InvalidTransaction(
-            format!("Mint authorization failed: {} is not an authorized minter", tx.signer)
-        ));
+        return Err(Error::InvalidTransaction(format!(
+            "Mint authorization failed: {} is not an authorized minter",
+            tx.signer
+        )));
     }
 
     if *amount == 0 {
         return Err(Error::InvalidTransaction(
-            "Mint amount must be greater than zero".to_string()
+            "Mint amount must be greater than zero".to_string(),
         ));
     }
 
@@ -43,54 +45,55 @@ pub fn validate_mint(
 }
 
 pub fn validate_open_meter(state: &State, tx: &SignedTx) -> Result<()> {
-    let Transaction::OpenMeter { owner, service_id, deposit } = &tx.kind else {
-        return Err(Error::InvalidTransaction("Expected OpenMeter transaction".to_string()));
+    let Transaction::OpenMeter {
+        owner,
+        service_id,
+        deposit,
+    } = &tx.kind
+    else {
+        return Err(Error::InvalidTransaction(
+            "Expected OpenMeter transaction".to_string(),
+        ));
     };
 
     if tx.signer != *owner {
-        return Err(Error::InvalidTransaction(
-            format!("Signer {} does not match owner {}", tx.signer, owner)
-        ));
+        return Err(Error::InvalidTransaction(format!(
+            "Signer {} does not match owner {}",
+            tx.signer, owner
+        )));
     }
 
-    let account = state.get_account(&tx.signer)
-        .ok_or_else(|| Error::InvalidTransaction(
-            format!("Account {} does not exist", tx.signer)
-        ))?;
-    
+    let account = state.get_account(&tx.signer).ok_or_else(|| {
+        Error::InvalidTransaction(format!("Account {} does not exist", tx.signer))
+    })?;
+
     if account.nonce() != tx.nonce {
-        return Err(Error::InvalidTransaction(
-            format!(
-                "Nonce mismatch: expected {}, got {}",
-                account.nonce(),
-                tx.nonce
-            )
-        ));
+        return Err(Error::InvalidTransaction(format!(
+            "Nonce mismatch: expected {}, got {}",
+            account.nonce(),
+            tx.nonce
+        )));
     }
 
     if *deposit == 0 {
         return Err(Error::InvalidTransaction(
-            "Deposit must be greater than zero".to_string()
+            "Deposit must be greater than zero".to_string(),
         ));
     }
 
     if !account.has_sufficient_balance(*deposit) {
-        return Err(Error::InvalidTransaction(
-            format!(
-                "Insufficient balance for deposit: have {}, need {}",
-                account.balance(),
-                deposit
-            )
-        ));
+        return Err(Error::InvalidTransaction(format!(
+            "Insufficient balance for deposit: have {}, need {}",
+            account.balance(),
+            deposit
+        )));
     }
 
     if state.has_active_meter(owner, service_id) {
-        return Err(Error::InvalidTransaction(
-            format!(
-                "Active meter already exists for owner {} and service {}",
-                owner, service_id
-            )
-        ));
+        return Err(Error::InvalidTransaction(format!(
+            "Active meter already exists for owner {} and service {}",
+            owner, service_id
+        )));
     }
 
     Ok(())
@@ -107,51 +110,54 @@ pub fn validate_open_meter(state: &State, tx: &SignedTx) -> Result<()> {
 /// - INV-14: Overflow Protection
 /// - INV-11: Sufficient Balance for Consumption
 pub fn validate_consume(state: &State, tx: &SignedTx) -> Result<u64> {
-    let Transaction::Consume { owner, service_id, units, pricing } = &tx.kind else {
-        return Err(Error::InvalidTransaction("Expected Consume transaction".to_string()));
+    let Transaction::Consume {
+        owner,
+        service_id,
+        units,
+        pricing,
+    } = &tx.kind
+    else {
+        return Err(Error::InvalidTransaction(
+            "Expected Consume transaction".to_string(),
+        ));
     };
 
     if tx.signer != *owner {
-        return Err(Error::InvalidTransaction(
-            format!("Signer {} does not match owner {}", tx.signer, owner)
-        ));
+        return Err(Error::InvalidTransaction(format!(
+            "Signer {} does not match owner {}",
+            tx.signer, owner
+        )));
     }
 
-    let account = state.get_account(&tx.signer)
-        .ok_or_else(|| Error::InvalidTransaction(
-            format!("Account {} does not exist", tx.signer)
-        ))?;
-    
+    let account = state.get_account(&tx.signer).ok_or_else(|| {
+        Error::InvalidTransaction(format!("Account {} does not exist", tx.signer))
+    })?;
+
     if account.nonce() != tx.nonce {
-        return Err(Error::InvalidTransaction(
-            format!(
-                "Nonce mismatch: expected {}, got {}",
-                account.nonce(),
-                tx.nonce
-            )
-        ));
+        return Err(Error::InvalidTransaction(format!(
+            "Nonce mismatch: expected {}, got {}",
+            account.nonce(),
+            tx.nonce
+        )));
     }
 
-    let meter = state.get_meter(owner, service_id)
-        .ok_or_else(|| Error::InvalidTransaction(
-            format!(
-                "Meter does not exist for owner {} and service {}",
-                owner, service_id
-            )
-        ))?;
-    
+    let meter = state.get_meter(owner, service_id).ok_or_else(|| {
+        Error::InvalidTransaction(format!(
+            "Meter does not exist for owner {} and service {}",
+            owner, service_id
+        ))
+    })?;
+
     if !meter.is_active() {
-        return Err(Error::InvalidTransaction(
-            format!(
-                "Meter is not active for owner {} and service {}",
-                owner, service_id
-            )
-        ));
+        return Err(Error::InvalidTransaction(format!(
+            "Meter is not active for owner {} and service {}",
+            owner, service_id
+        )));
     }
 
     if *units == 0 {
         return Err(Error::InvalidTransaction(
-            "Units must be greater than zero".to_string()
+            "Units must be greater than zero".to_string(),
         ));
     }
 
@@ -159,14 +165,14 @@ pub fn validate_consume(state: &State, tx: &SignedTx) -> Result<u64> {
         Pricing::UnitPrice(price) => {
             if *price == 0 {
                 return Err(Error::InvalidTransaction(
-                    "UnitPrice must be greater than zero".to_string()
+                    "UnitPrice must be greater than zero".to_string(),
                 ));
             }
         }
         Pricing::FixedCost(cost) => {
             if *cost == 0 {
                 return Err(Error::InvalidTransaction(
-                    "FixedCost must be greater than zero".to_string()
+                    "FixedCost must be greater than zero".to_string(),
                 ));
             }
         }
@@ -175,13 +181,11 @@ pub fn validate_consume(state: &State, tx: &SignedTx) -> Result<u64> {
     let cost = compute_cost(*units, pricing)?;
 
     if !account.has_sufficient_balance(cost) {
-        return Err(Error::InvalidTransaction(
-            format!(
-                "Insufficient balance for consumption: have {}, need {}",
-                account.balance(),
-                cost
-            )
-        ));
+        return Err(Error::InvalidTransaction(format!(
+            "Insufficient balance for consumption: have {}, need {}",
+            account.balance(),
+            cost
+        )));
     }
 
     Ok(cost)
@@ -195,45 +199,42 @@ pub fn validate_consume(state: &State, tx: &SignedTx) -> Result<u64> {
 /// - INV-6: Active Meter Requirement
 pub fn validate_close_meter(state: &State, tx: &SignedTx) -> Result<()> {
     let Transaction::CloseMeter { owner, service_id } = &tx.kind else {
-        return Err(Error::InvalidTransaction("Expected CloseMeter transaction".to_string()));
+        return Err(Error::InvalidTransaction(
+            "Expected CloseMeter transaction".to_string(),
+        ));
     };
 
     if tx.signer != *owner {
-        return Err(Error::InvalidTransaction(
-            format!("Signer {} does not match owner {}", tx.signer, owner)
-        ));
+        return Err(Error::InvalidTransaction(format!(
+            "Signer {} does not match owner {}",
+            tx.signer, owner
+        )));
     }
 
-    let account = state.get_account(&tx.signer)
-        .ok_or_else(|| Error::InvalidTransaction(
-            format!("Account {} does not exist", tx.signer)
-        ))?;
-    
+    let account = state.get_account(&tx.signer).ok_or_else(|| {
+        Error::InvalidTransaction(format!("Account {} does not exist", tx.signer))
+    })?;
+
     if account.nonce() != tx.nonce {
-        return Err(Error::InvalidTransaction(
-            format!(
-                "Nonce mismatch: expected {}, got {}",
-                account.nonce(),
-                tx.nonce
-            )
-        ));
+        return Err(Error::InvalidTransaction(format!(
+            "Nonce mismatch: expected {}, got {}",
+            account.nonce(),
+            tx.nonce
+        )));
     }
 
-    let meter = state.get_meter(owner, service_id)
-        .ok_or_else(|| Error::InvalidTransaction(
-            format!(
-                "Meter does not exist for owner {} and service {}",
-                owner, service_id
-            )
-        ))?;
-    
+    let meter = state.get_meter(owner, service_id).ok_or_else(|| {
+        Error::InvalidTransaction(format!(
+            "Meter does not exist for owner {} and service {}",
+            owner, service_id
+        ))
+    })?;
+
     if !meter.is_active() {
-        return Err(Error::InvalidTransaction(
-            format!(
-                "Meter is not active for owner {} and service {}",
-                owner, service_id
-            )
-        ));
+        return Err(Error::InvalidTransaction(format!(
+            "Meter is not active for owner {} and service {}",
+            owner, service_id
+        )));
     }
 
     Ok(())
@@ -403,7 +404,7 @@ mod tests {
         let mut state = create_test_state();
         let meter = Meter::new("alice".to_string(), "storage".to_string(), 50);
         state.insert_meter(meter);
-        
+
         let tx = SignedTx::new(
             "alice".to_string(),
             0,
@@ -421,7 +422,7 @@ mod tests {
         let mut state = create_test_state();
         let meter = Meter::new("alice".to_string(), "storage".to_string(), 100);
         state.insert_meter(meter);
-        
+
         let tx = SignedTx::new(
             "alice".to_string(),
             0,
@@ -443,7 +444,7 @@ mod tests {
         let mut meter = Meter::new("alice".to_string(), "storage".to_string(), 100);
         meter.close();
         state.insert_meter(meter);
-        
+
         let tx = SignedTx::new(
             "alice".to_string(),
             0,
@@ -462,7 +463,7 @@ mod tests {
         let mut state = create_test_state();
         let meter = Meter::new("alice".to_string(), "storage".to_string(), 100);
         state.insert_meter(meter);
-        
+
         let tx = SignedTx::new(
             "alice".to_string(),
             0,
@@ -481,7 +482,7 @@ mod tests {
         let mut state = create_test_state();
         let meter = Meter::new("alice".to_string(), "storage".to_string(), 100);
         state.insert_meter(meter);
-        
+
         let tx = SignedTx::new(
             "alice".to_string(),
             0,
@@ -499,7 +500,7 @@ mod tests {
         let mut meter = Meter::new("alice".to_string(), "storage".to_string(), 100);
         meter.close();
         state.insert_meter(meter);
-        
+
         let tx = SignedTx::new(
             "alice".to_string(),
             0,

@@ -13,19 +13,19 @@ use serde::{Deserialize, Serialize};
 pub struct Meter {
     /// Account that owns this meter
     pub owner: String,
-    
+
     /// Service identifier (e.g., "storage", "api_calls")
     pub service_id: String,
-    
+
     /// Cumulative usage units
     pub total_units: u64,
-    
+
     /// Cumulative cost paid
     pub total_spent: u64,
-    
+
     /// Whether the meter accepts consumption
     pub active: bool,
-    
+
     /// Committed funds (refunded on closure)
     pub locked_deposit: u64,
 }
@@ -117,12 +117,7 @@ mod tests {
 
     #[test]
     fn test_meter_reactivate() {
-        let mut meter = Meter::inactive(
-            "alice".to_string(),
-            "storage".to_string(),
-            50,
-            200,
-        );
+        let mut meter = Meter::inactive("alice".to_string(), "storage".to_string(), 50, 200);
         meter.reactivate(150);
         assert!(meter.active);
         assert_eq!(meter.locked_deposit, 150);
@@ -136,7 +131,7 @@ mod tests {
         meter.record_consumption(10, 50);
         assert_eq!(meter.total_units, 10);
         assert_eq!(meter.total_spent, 50);
-        
+
         meter.record_consumption(5, 25);
         assert_eq!(meter.total_units, 15);
         assert_eq!(meter.total_spent, 75);

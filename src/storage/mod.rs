@@ -2,9 +2,9 @@ pub mod kv;
 
 pub use kv::FileStorage;
 
+use crate::error::Result;
 use crate::state::State;
 use crate::tx::SignedTx;
-use crate::error::Result;
 
 /// Storage abstraction for append-only transaction logs and state snapshots.
 ///

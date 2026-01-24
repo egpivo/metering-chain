@@ -242,9 +242,7 @@ fn main() -> Result<(), String> {
     let mut out = String::new();
 
     for (i, item) in items.iter().enumerate() {
-        let nonce = start_nonce
-            .checked_add(i as u64)
-            .ok_or("nonce overflow")?;
+        let nonce = start_nonce.checked_add(i as u64).ok_or("nonce overflow")?;
 
         let units_u64 = bigint_to_u64(&item.units).ok_or("units overflow u64")?;
 
@@ -269,7 +267,9 @@ fn main() -> Result<(), String> {
         Some(path) => fs::write(path, out).map_err(|e| e.to_string())?,
         None => {
             let mut stdout = io::stdout();
-            stdout.write_all(out.as_bytes()).map_err(|e| e.to_string())?;
+            stdout
+                .write_all(out.as_bytes())
+                .map_err(|e| e.to_string())?;
         }
     }
 

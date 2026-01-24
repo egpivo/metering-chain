@@ -1,7 +1,7 @@
 use crate::chain::block::Block;
 use crate::logger::Logger;
-use num_bigint::{BigInt, Sign};
 use hex::encode as hex_encode;
+use num_bigint::{BigInt, Sign};
 use std::borrow::Borrow;
 
 const MAX_NONCE: i64 = i64::MAX;

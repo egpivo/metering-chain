@@ -12,11 +12,7 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn new_block(
-        pre_block_hash: String,
-        transactions: &[SignedTx],
-        height: usize,
-    ) -> Block {
+    pub fn new_block(pre_block_hash: String, transactions: &[SignedTx], height: usize) -> Block {
         Block {
             timestamp: crate::current_timestamp(),
             pre_block_hash,

@@ -1,7 +1,7 @@
-use metering_chain::state::{State, apply};
-use metering_chain::storage::{Storage, FileStorage};
-use metering_chain::tx::{SignedTx, Transaction, Pricing};
 use metering_chain::error::Error;
+use metering_chain::state::{apply, State};
+use metering_chain::storage::{FileStorage, Storage};
+use metering_chain::tx::{Pricing, SignedTx, Transaction};
 use std::collections::HashSet;
 use tempfile::TempDir;
 
@@ -227,13 +227,28 @@ fn test_state_reconstruction() {
 
     // Verify reconstructed state matches current state
     // reconstructed_tx_id should be tx_id (snapshot at 2 + replay tx3 = 3)
-    assert_eq!(reconstructed_tx_id, tx_id, "Reconstructed tx_id should match current tx_id");
-    assert_eq!(reconstructed_state.get_account("alice").unwrap().balance(), state.get_account("alice").unwrap().balance());
-    assert_eq!(reconstructed_state.get_account("alice").unwrap().nonce(), state.get_account("alice").unwrap().nonce());
+    assert_eq!(
+        reconstructed_tx_id, tx_id,
+        "Reconstructed tx_id should match current tx_id"
+    );
+    assert_eq!(
+        reconstructed_state.get_account("alice").unwrap().balance(),
+        state.get_account("alice").unwrap().balance()
+    );
+    assert_eq!(
+        reconstructed_state.get_account("alice").unwrap().nonce(),
+        state.get_account("alice").unwrap().nonce()
+    );
     let reconstructed_meter = reconstructed_state.get_meter("alice", "storage").unwrap();
     let current_meter = state.get_meter("alice", "storage").unwrap();
-    assert_eq!(reconstructed_meter.total_units(), current_meter.total_units());
-    assert_eq!(reconstructed_meter.total_spent(), current_meter.total_spent());
+    assert_eq!(
+        reconstructed_meter.total_units(),
+        current_meter.total_units()
+    );
+    assert_eq!(
+        reconstructed_meter.total_spent(),
+        current_meter.total_spent()
+    );
 }
 
 /// Test meter reopening scenario
@@ -741,7 +756,7 @@ fn test_fixed_cost_pricing() {
         Transaction::Consume {
             owner: "alice".to_string(),
             service_id: "api_calls".to_string(),
-            units: 100, // Units don't matter for fixed cost
+            units: 100,                      // Units don't matter for fixed cost
             pricing: Pricing::FixedCost(50), // Fixed cost: 50
         },
     );

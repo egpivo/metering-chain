@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub struct Account {
     /// Spendable funds held by the account
     pub balance: u64,
-    
+
     /// Per-account sequence number for ordering and replay protection
     pub nonce: u64,
 }
@@ -23,10 +23,7 @@ impl Account {
     }
 
     pub fn with_balance(balance: u64) -> Self {
-        Account {
-            balance,
-            nonce: 0,
-        }
+        Account { balance, nonce: 0 }
     }
 
     pub fn increment_nonce(&mut self) {
