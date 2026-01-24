@@ -94,6 +94,10 @@ cargo run --bin metering-chain -- --format json account <address>
 * `docs/invariants.md`
 * `docs/architecture.md`
 
+## Architecture
+
+![Metering Chain architecture](docs/arch.gif)
+
 ---
 
 ## License
