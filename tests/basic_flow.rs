@@ -675,10 +675,9 @@ fn test_rejection_zero_units() {
 /// Test FixedCost pricing model
 #[test]
 fn test_fixed_cost_pricing() {
-    let (mut storage, _temp_dir) = create_test_storage();
+    let (_storage, _temp_dir) = create_test_storage();
     let minters = get_authorized_minters();
     let mut state = State::new();
-    let mut tx_id = 0u64;
 
     // Setup
     let tx1 = SignedTx::new(
@@ -690,8 +689,6 @@ fn test_fixed_cost_pricing() {
         },
     );
     state = apply(&state, &tx1, &minters).unwrap();
-    storage.append_tx(&tx1).unwrap();
-    tx_id += 1;
 
     let tx2 = SignedTx::new(
         "alice".to_string(),
@@ -703,8 +700,6 @@ fn test_fixed_cost_pricing() {
         },
     );
     state = apply(&state, &tx2, &minters).unwrap();
-    storage.append_tx(&tx2).unwrap();
-    tx_id += 1;
 
     // Consume with fixed cost (regardless of units)
     let tx3 = SignedTx::new(
@@ -718,8 +713,6 @@ fn test_fixed_cost_pricing() {
         },
     );
     state = apply(&state, &tx3, &minters).unwrap();
-    storage.append_tx(&tx3).unwrap();
-    tx_id += 1;
 
     // Verify: cost is 50 regardless of units
     assert_eq!(state.get_account("alice").unwrap().balance(), 850); // 1000 - 100 - 50
@@ -731,10 +724,9 @@ fn test_fixed_cost_pricing() {
 /// Test multiple meters for same account
 #[test]
 fn test_multiple_meters() {
-    let (mut storage, _temp_dir) = create_test_storage();
+    let (_storage, _temp_dir) = create_test_storage();
     let minters = get_authorized_minters();
     let mut state = State::new();
-    let mut tx_id = 0u64;
 
     // Setup
     let tx1 = SignedTx::new(
@@ -746,8 +738,6 @@ fn test_multiple_meters() {
         },
     );
     state = apply(&state, &tx1, &minters).unwrap();
-    storage.append_tx(&tx1).unwrap();
-    tx_id += 1;
 
     // Open two different meters
     let tx2 = SignedTx::new(
@@ -760,8 +750,6 @@ fn test_multiple_meters() {
         },
     );
     state = apply(&state, &tx2, &minters).unwrap();
-    storage.append_tx(&tx2).unwrap();
-    tx_id += 1;
 
     let tx3 = SignedTx::new(
         "alice".to_string(),
@@ -773,8 +761,6 @@ fn test_multiple_meters() {
         },
     );
     state = apply(&state, &tx3, &minters).unwrap();
-    storage.append_tx(&tx3).unwrap();
-    tx_id += 1;
 
     // Consume on both meters
     let tx4 = SignedTx::new(
@@ -788,8 +774,6 @@ fn test_multiple_meters() {
         },
     );
     state = apply(&state, &tx4, &minters).unwrap();
-    storage.append_tx(&tx4).unwrap();
-    tx_id += 1;
 
     let tx5 = SignedTx::new(
         "alice".to_string(),
@@ -802,8 +786,6 @@ fn test_multiple_meters() {
         },
     );
     state = apply(&state, &tx5, &minters).unwrap();
-    storage.append_tx(&tx5).unwrap();
-    tx_id += 1;
 
     // Verify both meters are independent
     let storage_meter = state.get_meter("alice", "storage").unwrap();
