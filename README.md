@@ -1,5 +1,7 @@
 # Metering Chain
 
+[![CI](https://github.com/egpivo/metering-chain/actions/workflows/ci.yml/badge.svg)](https://github.com/egpivo/metering-chain/actions/workflows/ci.yml)
+
 Deterministic metering engine for on-chain service usage and billing (Rust).
 
 ---
