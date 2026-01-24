@@ -21,32 +21,17 @@ fn create_test_storage() -> (FileStorage, TempDir) {
 
 fn load_or_replay_state(storage: &FileStorage) -> (State, u64) {
     let minters = get_authorized_minters();
-    match storage.load_state().unwrap() {
-        Some((state, last_tx_id)) => {
-            // Load all transactions from the log
-            let all_txs = storage.load_txs_from(0).unwrap();
-            // Replay from genesis to get current state
-            let mut current_state = State::new();
-            let mut current_tx_id = 0u64;
-            for tx in all_txs {
-                current_state = apply(&current_state, &tx, &minters).unwrap();
-                current_tx_id += 1;
-            }
-            (current_state, current_tx_id)
-        }
-        None => {
-            // No snapshot, replay all transactions from log
-            let all_txs = storage.load_txs_from(0).unwrap();
-            let mut current_state = State::new();
-            let mut current_tx_id = 0u64;
-            let minters = get_authorized_minters();
-            for tx in all_txs {
-                current_state = apply(&current_state, &tx, &minters).unwrap();
-                current_tx_id += 1;
-            }
-            (current_state, current_tx_id)
-        }
+    let all_txs = storage.load_txs_from(0).unwrap();
+    let mut current_state = match storage.load_state().unwrap() {
+        Some((state, _last_tx_id)) => state,
+        None => State::new(),
+    };
+    let mut current_tx_id = 0u64;
+    for tx in all_txs {
+        current_state = apply(&current_state, &tx, &minters).unwrap();
+        current_tx_id += 1;
     }
+    (current_state, current_tx_id)
 }
 
 /// Test the complete happy path: Mint → OpenMeter → Consume → CloseMeter
@@ -254,10 +239,9 @@ fn test_state_reconstruction() {
 /// Test meter reopening scenario
 #[test]
 fn test_meter_reopening() {
-    let (mut storage, _temp_dir) = create_test_storage();
+    let (_storage, _temp_dir) = create_test_storage();
     let minters = get_authorized_minters();
     let mut state = State::new();
-    let mut tx_id = 0u64;
 
     // Setup: mint and open meter
     let tx1 = SignedTx::new(
@@ -269,8 +253,6 @@ fn test_meter_reopening() {
         },
     );
     state = apply(&state, &tx1, &minters).unwrap();
-    storage.append_tx(&tx1).unwrap();
-    tx_id += 1;
 
     let tx2 = SignedTx::new(
         "alice".to_string(),
@@ -282,8 +264,6 @@ fn test_meter_reopening() {
         },
     );
     state = apply(&state, &tx2, &minters).unwrap();
-    storage.append_tx(&tx2).unwrap();
-    tx_id += 1;
 
     // Consume some units
     let tx3 = SignedTx::new(
@@ -297,8 +277,6 @@ fn test_meter_reopening() {
         },
     );
     state = apply(&state, &tx3, &minters).unwrap();
-    storage.append_tx(&tx3).unwrap();
-    tx_id += 1;
 
     // Close meter
     let tx4 = SignedTx::new(
@@ -310,8 +288,6 @@ fn test_meter_reopening() {
         },
     );
     state = apply(&state, &tx4, &minters).unwrap();
-    storage.append_tx(&tx4).unwrap();
-    tx_id += 1;
 
     // Verify meter is inactive but totals preserved
     let meter = state.get_meter("alice", "storage").unwrap();
@@ -330,8 +306,6 @@ fn test_meter_reopening() {
         },
     );
     state = apply(&state, &tx5, &minters).unwrap();
-    storage.append_tx(&tx5).unwrap();
-    tx_id += 1;
 
     // Verify: meter reactivated, totals preserved, new deposit set
     let meter = state.get_meter("alice", "storage").unwrap();
@@ -348,7 +322,6 @@ fn test_rejection_invalid_nonce() {
     let (mut storage, _temp_dir) = create_test_storage();
     let minters = get_authorized_minters();
     let mut state = State::new();
-    let mut tx_id = 0u64;
 
     // Setup: mint and open meter
     let tx1 = SignedTx::new(
@@ -361,7 +334,6 @@ fn test_rejection_invalid_nonce() {
     );
     state = apply(&state, &tx1, &minters).unwrap();
     storage.append_tx(&tx1).unwrap();
-    tx_id += 1;
 
     let tx2 = SignedTx::new(
         "alice".to_string(),
@@ -374,7 +346,6 @@ fn test_rejection_invalid_nonce() {
     );
     state = apply(&state, &tx2, &minters).unwrap();
     storage.append_tx(&tx2).unwrap();
-    tx_id += 1;
 
     // Try to consume with wrong nonce (should be 1, but using 0)
     let tx3 = SignedTx::new(
@@ -401,10 +372,9 @@ fn test_rejection_invalid_nonce() {
 /// Test rejection: insufficient balance for deposit
 #[test]
 fn test_rejection_insufficient_balance_deposit() {
-    let (mut storage, _temp_dir) = create_test_storage();
+    let (_storage, _temp_dir) = create_test_storage();
     let minters = get_authorized_minters();
     let mut state = State::new();
-    let mut tx_id = 0u64;
 
     // Mint only 50 to alice
     let tx1 = SignedTx::new(
@@ -416,8 +386,6 @@ fn test_rejection_insufficient_balance_deposit() {
         },
     );
     state = apply(&state, &tx1, &minters).unwrap();
-    storage.append_tx(&tx1).unwrap();
-    tx_id += 1;
 
     // Try to open meter with 100 deposit (insufficient balance)
     let tx2 = SignedTx::new(
@@ -443,10 +411,9 @@ fn test_rejection_insufficient_balance_deposit() {
 /// Test rejection: insufficient balance for consumption
 #[test]
 fn test_rejection_insufficient_balance_consumption() {
-    let (mut storage, _temp_dir) = create_test_storage();
+    let (_storage, _temp_dir) = create_test_storage();
     let minters = get_authorized_minters();
     let mut state = State::new();
-    let mut tx_id = 0u64;
 
     // Setup: mint 100, open meter with 50 deposit
     let tx1 = SignedTx::new(
@@ -458,8 +425,6 @@ fn test_rejection_insufficient_balance_consumption() {
         },
     );
     state = apply(&state, &tx1, &minters).unwrap();
-    storage.append_tx(&tx1).unwrap();
-    tx_id += 1;
 
     let tx2 = SignedTx::new(
         "alice".to_string(),
@@ -471,8 +436,6 @@ fn test_rejection_insufficient_balance_consumption() {
         },
     );
     state = apply(&state, &tx2, &minters).unwrap();
-    storage.append_tx(&tx2).unwrap();
-    tx_id += 1;
 
     // Try to consume with cost 100 (but balance is only 50)
     let tx3 = SignedTx::new(
@@ -499,7 +462,7 @@ fn test_rejection_insufficient_balance_consumption() {
 /// Test rejection: unauthorized mint
 #[test]
 fn test_rejection_unauthorized_mint() {
-    let (mut storage, _temp_dir) = create_test_storage();
+    let (_storage, _temp_dir) = create_test_storage();
     let minters = get_authorized_minters();
     let state = State::new();
 
@@ -526,10 +489,9 @@ fn test_rejection_unauthorized_mint() {
 /// Test rejection: consume on inactive meter
 #[test]
 fn test_rejection_consume_inactive_meter() {
-    let (mut storage, _temp_dir) = create_test_storage();
+    let (_storage, _temp_dir) = create_test_storage();
     let minters = get_authorized_minters();
     let mut state = State::new();
-    let mut tx_id = 0u64;
 
     // Setup: mint, open meter, then close it
     let tx1 = SignedTx::new(
@@ -541,8 +503,6 @@ fn test_rejection_consume_inactive_meter() {
         },
     );
     state = apply(&state, &tx1, &minters).unwrap();
-    storage.append_tx(&tx1).unwrap();
-    tx_id += 1;
 
     let tx2 = SignedTx::new(
         "alice".to_string(),
@@ -554,8 +514,6 @@ fn test_rejection_consume_inactive_meter() {
         },
     );
     state = apply(&state, &tx2, &minters).unwrap();
-    storage.append_tx(&tx2).unwrap();
-    tx_id += 1;
 
     let tx3 = SignedTx::new(
         "alice".to_string(),
@@ -566,8 +524,6 @@ fn test_rejection_consume_inactive_meter() {
         },
     );
     state = apply(&state, &tx3, &minters).unwrap();
-    storage.append_tx(&tx3).unwrap();
-    tx_id += 1;
 
     // Try to consume on inactive meter
     let tx4 = SignedTx::new(
@@ -594,10 +550,9 @@ fn test_rejection_consume_inactive_meter() {
 /// Test rejection: wrong signer (not the owner)
 #[test]
 fn test_rejection_wrong_signer() {
-    let (mut storage, _temp_dir) = create_test_storage();
+    let (_storage, _temp_dir) = create_test_storage();
     let minters = get_authorized_minters();
     let mut state = State::new();
-    let mut tx_id = 0u64;
 
     // Setup: mint to alice and bob, alice opens meter
     let tx1 = SignedTx::new(
@@ -609,8 +564,6 @@ fn test_rejection_wrong_signer() {
         },
     );
     state = apply(&state, &tx1, &minters).unwrap();
-    storage.append_tx(&tx1).unwrap();
-    tx_id += 1;
 
     let tx2 = SignedTx::new(
         "authority".to_string(),
@@ -621,8 +574,6 @@ fn test_rejection_wrong_signer() {
         },
     );
     state = apply(&state, &tx2, &minters).unwrap();
-    storage.append_tx(&tx2).unwrap();
-    tx_id += 1;
 
     let tx3 = SignedTx::new(
         "alice".to_string(),
@@ -634,8 +585,6 @@ fn test_rejection_wrong_signer() {
         },
     );
     state = apply(&state, &tx3, &minters).unwrap();
-    storage.append_tx(&tx3).unwrap();
-    tx_id += 1;
 
     // Bob tries to consume on alice's meter
     let tx4 = SignedTx::new(
@@ -662,10 +611,9 @@ fn test_rejection_wrong_signer() {
 /// Test rejection: zero units
 #[test]
 fn test_rejection_zero_units() {
-    let (mut storage, _temp_dir) = create_test_storage();
+    let (_storage, _temp_dir) = create_test_storage();
     let minters = get_authorized_minters();
     let mut state = State::new();
-    let mut tx_id = 0u64;
 
     // Setup: mint and open meter
     let tx1 = SignedTx::new(
@@ -677,8 +625,6 @@ fn test_rejection_zero_units() {
         },
     );
     state = apply(&state, &tx1, &minters).unwrap();
-    storage.append_tx(&tx1).unwrap();
-    tx_id += 1;
 
     let tx2 = SignedTx::new(
         "alice".to_string(),
@@ -690,8 +636,6 @@ fn test_rejection_zero_units() {
         },
     );
     state = apply(&state, &tx2, &minters).unwrap();
-    storage.append_tx(&tx2).unwrap();
-    tx_id += 1;
 
     // Try to consume 0 units
     let tx3 = SignedTx::new(
