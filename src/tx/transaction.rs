@@ -70,6 +70,28 @@ pub struct SignedTx {
     pub signature: Option<Vec<u8>>,
 }
 
+impl SignedTx {
+    pub fn new(signer: String, nonce: u64, kind: Transaction) -> Self {
+        SignedTx {
+            signer,
+            nonce,
+            kind,
+            signature: None,
+        }
+    }
+
+    /// Canonical bytes to sign (bincode of signer, nonce, kind). Verification must use the same format.
+    pub fn message_to_sign(&self) -> crate::error::Result<Vec<u8>> {
+        let payload = SignablePayload {
+            signer: self.signer.clone(),
+            nonce: self.nonce,
+            kind: self.kind.clone(),
+        };
+        bincode::serialize(&payload)
+            .map_err(|e| crate::error::Error::InvalidTransaction(e.to_string()))
+    }
+}
+
 /// Deserialize SignedTx from bincode; accepts Phase 1 layout (no signature) for backward compatibility.
 pub fn deserialize_signed_tx_bincode(bytes: &[u8]) -> crate::error::Result<SignedTx> {
     match bincode::deserialize::<SignedTx>(bytes) {
@@ -103,27 +125,5 @@ mod tests {
         assert_eq!(tx.nonce, 0);
         assert!(matches!(tx.kind, Transaction::Mint { .. }));
         assert!(tx.signature.is_none());
-    }
-}
-
-impl SignedTx {
-    pub fn new(signer: String, nonce: u64, kind: Transaction) -> Self {
-        SignedTx {
-            signer,
-            nonce,
-            kind,
-            signature: None,
-        }
-    }
-
-    /// Canonical bytes to sign (bincode of signer, nonce, kind). Verification must use the same format.
-    pub fn message_to_sign(&self) -> crate::error::Result<Vec<u8>> {
-        let payload = SignablePayload {
-            signer: self.signer.clone(),
-            nonce: self.nonce,
-            kind: self.kind.clone(),
-        };
-        bincode::serialize(&payload)
-            .map_err(|e| crate::error::Error::InvalidTransaction(e.to_string()))
     }
 }
