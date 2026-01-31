@@ -91,16 +91,17 @@ pub enum WalletSub {
 }
 
 /// Load state from storage or return genesis state
-pub fn load_or_create_state(storage: &FileStorage, config: &Config) -> Result<(State, u64)> {
+pub fn load_or_create_state(storage: &FileStorage, _config: &Config) -> Result<(State, u64)> {
     match storage.load_state()? {
         Some((state, last_tx_id)) => {
             let txs = storage.load_txs_from(last_tx_id + 1)?;
             let mut current_state = state;
             let mut current_tx_id = last_tx_id;
-            let minters = get_authorized_minters(config);
-
             for tx in txs {
-                current_state = apply(&current_state, &tx, &minters)?;
+                if tx.signature.is_some() {
+                    wallet::verify_signature(&tx)?;
+                }
+                current_state = apply(&current_state, &tx, None)?;
                 current_tx_id += 1;
             }
 
@@ -110,13 +111,18 @@ pub fn load_or_create_state(storage: &FileStorage, config: &Config) -> Result<(S
     }
 }
 
-/// Get authorized minters: legacy "authority" + all wallet addresses (Phase 2)
-fn get_authorized_minters(config: &Config) -> HashSet<String> {
+/// Authorized minters: "authority" (legacy) + METERING_CHAIN_MINTERS env (comma-separated addresses).
+/// Only explicitly listed addresses can mint; locally-created wallets are not minters by default.
+fn get_authorized_minters(_config: &Config) -> HashSet<String> {
     let mut minters = HashSet::new();
     minters.insert("authority".to_string());
-    let wallets = metering_chain::wallet::Wallets::new(config.get_wallets_path().clone());
-    for addr in wallets.get_addresses() {
-        minters.insert(addr);
+    if let Ok(list) = std::env::var("METERING_CHAIN_MINTERS") {
+        for addr in list.split(',') {
+            let a = addr.trim();
+            if !a.is_empty() {
+                minters.insert(a.to_string());
+            }
+        }
     }
     minters
 }
@@ -193,11 +199,12 @@ pub fn run(cli: Cli) -> Result<()> {
 
             let signed_tx = parse_tx(&tx_json)?;
 
-            // Verify signature (Phase 2); legacy unsigned tx allowed for replay
+            // Phase 2: require valid signature for user-submitted tx (replay from log does not call this)
             wallet::verify_signature(&signed_tx)?;
 
             // Validate transaction
-            let cost_opt = metering_chain::tx::validation::validate(&state, &signed_tx, &minters)?;
+            let cost_opt =
+                metering_chain::tx::validation::validate(&state, &signed_tx, Some(&minters))?;
 
             if dry_run {
                 println!("✓ Transaction is valid");
@@ -208,7 +215,7 @@ pub fn run(cli: Cli) -> Result<()> {
             }
 
             // Apply transaction
-            state = apply(&state, &signed_tx, &minters)?;
+            state = apply(&state, &signed_tx, Some(&minters))?;
             last_tx_id += 1;
 
             // Persist transaction and state

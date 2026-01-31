@@ -20,7 +20,7 @@ pub fn compute_cost(units: u64, pricing: &Pricing) -> Result<u64> {
 pub fn validate_mint(
     _state: &State,
     tx: &SignedTx,
-    authorized_minters: &std::collections::HashSet<String>,
+    authorized_minters: Option<&std::collections::HashSet<String>>,
 ) -> Result<()> {
     let Transaction::Mint { to: _to, amount } = &tx.kind else {
         return Err(Error::InvalidTransaction(
@@ -28,11 +28,13 @@ pub fn validate_mint(
         ));
     };
 
-    if !authorized_minters.contains(&tx.signer) {
-        return Err(Error::InvalidTransaction(format!(
-            "Mint authorization failed: {} is not an authorized minter",
-            tx.signer
-        )));
+    if let Some(minters) = authorized_minters {
+        if !minters.contains(&tx.signer) {
+            return Err(Error::InvalidTransaction(format!(
+                "Mint authorization failed: {} is not an authorized minter",
+                tx.signer
+            )));
+        }
     }
 
     if *amount == 0 {
@@ -247,7 +249,7 @@ pub fn validate_close_meter(state: &State, tx: &SignedTx) -> Result<()> {
 pub fn validate(
     state: &State,
     tx: &SignedTx,
-    authorized_minters: &std::collections::HashSet<String>,
+    authorized_minters: Option<&std::collections::HashSet<String>>,
 ) -> Result<Option<u64>> {
     match &tx.kind {
         Transaction::Mint { .. } => {
@@ -321,7 +323,7 @@ mod tests {
                 amount: 100,
             },
         );
-        assert!(validate_mint(&state, &tx, &minters).is_ok());
+        assert!(validate_mint(&state, &tx, Some(&minters)).is_ok());
     }
 
     #[test]
@@ -336,7 +338,7 @@ mod tests {
                 amount: 100,
             },
         );
-        assert!(validate_mint(&state, &tx, &minters).is_err());
+        assert!(validate_mint(&state, &tx, Some(&minters)).is_err());
     }
 
     #[test]
@@ -351,7 +353,7 @@ mod tests {
                 amount: 0,
             },
         );
-        assert!(validate_mint(&state, &tx, &minters).is_err());
+        assert!(validate_mint(&state, &tx, Some(&minters)).is_err());
     }
 
     #[test]

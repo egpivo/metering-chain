@@ -71,11 +71,11 @@ pub fn address_to_public_key(address: &str) -> Option<[u8; 32]> {
     Some(arr)
 }
 
-/// Verify SignedTx: address must be hex(pubkey), signature must verify over canonical message.
+/// Verify SignedTx: Phase 2 requires a valid signature. Replay from tx.log does not call this.
 pub fn verify_signature(tx: &SignedTx) -> Result<()> {
-    let Some(ref sig_bytes) = tx.signature else {
-        return Ok(()); // legacy unsigned: allow for replay
-    };
+    let sig_bytes = tx.signature.as_ref().ok_or_else(|| {
+        Error::SignatureVerification("Signed transaction required (Phase 2)".to_string())
+    })?;
     let pubkey_bytes = address_to_public_key(&tx.signer).ok_or_else(|| {
         Error::SignatureVerification(format!(
             "Invalid address format (expected hex pubkey): {}",
