@@ -3,6 +3,11 @@
 This demo simulates **multiple operators** (hotspots) using Helium rewards data.
 It keeps billing deterministic and maps each hotspot to a service_id.
 
+**Python:** `helium_rewards_to_consume.py` uses stdlib only. For `analyze_rewards.py` and `fetch_dune_iot_transfers.py`, run:
+```bash
+pip install -r examples/multi_operator/requirements.txt
+```
+
 ## 0) Data source (real data)
 
 Two options:
