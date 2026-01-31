@@ -10,6 +10,9 @@ pub enum Error {
 
     #[error("State error: {0}")]
     StateError(String),
+
+    #[error("Signature verification failed: {0}")]
+    SignatureVerification(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

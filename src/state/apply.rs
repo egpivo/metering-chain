@@ -4,7 +4,12 @@ use crate::tx::validation::validate;
 use crate::tx::{SignedTx, Transaction};
 use std::collections::HashSet;
 
-pub fn apply(state: &State, tx: &SignedTx, authorized_minters: &HashSet<String>) -> Result<State> {
+/// When authorized_minters is None (replay), mint authorization is skipped for deterministic replay.
+pub fn apply(
+    state: &State,
+    tx: &SignedTx,
+    authorized_minters: Option<&HashSet<String>>,
+) -> Result<State> {
     let cost_opt = validate(state, tx, authorized_minters)?;
     let mut new_state = state.clone();
     match &tx.kind {
@@ -146,7 +151,7 @@ mod tests {
             },
         );
 
-        let new_state = apply(&state, &tx, &minters).unwrap();
+        let new_state = apply(&state, &tx, Some(&minters)).unwrap();
         let account = new_state.get_account("alice").unwrap();
         assert_eq!(account.balance(), 1000);
     }
@@ -169,7 +174,7 @@ mod tests {
             },
         );
 
-        let new_state = apply(&state, &tx, &minters).unwrap();
+        let new_state = apply(&state, &tx, Some(&minters)).unwrap();
 
         // Check account balance decreased
         let account = new_state.get_account("alice").unwrap();
@@ -208,7 +213,7 @@ mod tests {
             },
         );
 
-        let new_state = apply(&state, &tx, &minters).unwrap();
+        let new_state = apply(&state, &tx, Some(&minters)).unwrap();
 
         // Check meter reactivated with preserved totals
         let meter = new_state.get_meter("alice", "storage").unwrap();
@@ -239,7 +244,7 @@ mod tests {
             },
         );
 
-        let new_state = apply(&state, &tx, &minters).unwrap();
+        let new_state = apply(&state, &tx, Some(&minters)).unwrap();
 
         // Check account balance decreased
         let account = new_state.get_account("alice").unwrap();
@@ -271,7 +276,7 @@ mod tests {
             },
         );
 
-        let new_state = apply(&state, &tx, &minters).unwrap();
+        let new_state = apply(&state, &tx, Some(&minters)).unwrap();
 
         // Check account balance increased (deposit returned)
         let account = new_state.get_account("alice").unwrap();
@@ -299,7 +304,7 @@ mod tests {
             },
         );
 
-        let result = apply(&state, &tx, &minters);
+        let result = apply(&state, &tx, Some(&minters));
         assert!(result.is_err());
     }
 
@@ -317,7 +322,7 @@ mod tests {
                 amount: 1000,
             },
         );
-        state = apply(&state, &tx1, &minters).unwrap();
+        state = apply(&state, &tx1, Some(&minters)).unwrap();
         assert_eq!(state.get_account("alice").unwrap().balance(), 1000);
 
         // 2. Open meter
@@ -330,7 +335,7 @@ mod tests {
                 deposit: 100,
             },
         );
-        state = apply(&state, &tx2, &minters).unwrap();
+        state = apply(&state, &tx2, Some(&minters)).unwrap();
         assert_eq!(state.get_account("alice").unwrap().balance(), 900);
 
         // 3. Consume
@@ -344,7 +349,7 @@ mod tests {
                 pricing: Pricing::UnitPrice(5),
             },
         );
-        state = apply(&state, &tx3, &minters).unwrap();
+        state = apply(&state, &tx3, Some(&minters)).unwrap();
         assert_eq!(state.get_account("alice").unwrap().balance(), 850);
         assert_eq!(
             state.get_meter("alice", "storage").unwrap().total_units(),
@@ -360,7 +365,7 @@ mod tests {
                 service_id: "storage".to_string(),
             },
         );
-        state = apply(&state, &tx4, &minters).unwrap();
+        state = apply(&state, &tx4, Some(&minters)).unwrap();
         assert_eq!(state.get_account("alice").unwrap().balance(), 950); // 850 + 100 deposit
         assert!(!state.get_meter("alice", "storage").unwrap().is_active());
     }

@@ -4,6 +4,7 @@ use metering_chain::error::{Error, Result};
 use metering_chain::state::{apply, State};
 use metering_chain::storage::{FileStorage, Storage};
 use metering_chain::tx::SignedTx;
+use metering_chain::wallet;
 use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Read};
@@ -42,6 +43,16 @@ pub enum Commands {
         /// Dry-run: validate but don't apply
         #[arg(long)]
         dry_run: bool,
+
+        /// Allow unsigned transactions (legacy/Phase 1). Signed tx still verified.
+        #[arg(long)]
+        allow_unsigned: bool,
+    },
+
+    /// Wallet operations (Phase 2: create, list, sign)
+    Wallet {
+        #[command(subcommand)]
+        sub: WalletSub,
     },
 
     /// Show account information
@@ -63,20 +74,38 @@ pub enum Commands {
     },
 }
 
+#[derive(Subcommand)]
+pub enum WalletSub {
+    /// Create a new wallet (keypair, address = hex of pubkey)
+    Create,
+
+    /// List all wallet addresses
+    List,
+
+    /// Sign a transaction (needs current nonce from state)
+    Sign {
+        /// Wallet address (signer)
+        #[arg(short, long)]
+        address: String,
+
+        /// JSON file with transaction kind only, e.g. {"Consume":{"owner":"0x...","service_id":"s","units":1,"pricing":{"UnitPrice":2}}}
+        #[arg(short, long)]
+        file: String,
+    },
+}
+
 /// Load state from storage or return genesis state
-pub fn load_or_create_state(storage: &FileStorage) -> Result<(State, u64)> {
+pub fn load_or_create_state(storage: &FileStorage, _config: &Config) -> Result<(State, u64)> {
     match storage.load_state()? {
         Some((state, last_tx_id)) => {
-            // Replay any transactions after the snapshot
             let txs = storage.load_txs_from(last_tx_id + 1)?;
             let mut current_state = state;
             let mut current_tx_id = last_tx_id;
-
-            // Get authorized minters (hardcoded for MVP)
-            let minters = get_authorized_minters();
-
             for tx in txs {
-                current_state = apply(&current_state, &tx, &minters)?;
+                if tx.signature.is_some() {
+                    wallet::verify_signature(&tx)?;
+                }
+                current_state = apply(&current_state, &tx, None)?;
                 current_tx_id += 1;
             }
 
@@ -86,10 +115,19 @@ pub fn load_or_create_state(storage: &FileStorage) -> Result<(State, u64)> {
     }
 }
 
-/// Get authorized minters (hardcoded for MVP)
-fn get_authorized_minters() -> HashSet<String> {
+/// Authorized minters: "authority" (legacy) + METERING_CHAIN_MINTERS env (comma-separated addresses).
+/// Only explicitly listed addresses can mint; locally-created wallets are not minters by default.
+fn get_authorized_minters(_config: &Config) -> HashSet<String> {
     let mut minters = HashSet::new();
     minters.insert("authority".to_string());
+    if let Ok(list) = std::env::var("METERING_CHAIN_MINTERS") {
+        for addr in list.split(',') {
+            let a = addr.trim();
+            if !a.is_empty() {
+                minters.insert(a.to_string());
+            }
+        }
+    }
     minters
 }
 
@@ -138,7 +176,7 @@ pub fn run(cli: Cli) -> Result<()> {
     }
 
     let mut storage = FileStorage::new(&config);
-    let minters = get_authorized_minters();
+    let minters = get_authorized_minters(&config);
 
     match cli.command {
         Commands::Init => {
@@ -153,9 +191,14 @@ pub fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
 
-        Commands::Apply { tx, file, dry_run } => {
+        Commands::Apply {
+            tx,
+            file,
+            dry_run,
+            allow_unsigned,
+        } => {
             // Load current state
-            let (mut state, mut last_tx_id) = load_or_create_state(&storage)?;
+            let (mut state, mut last_tx_id) = load_or_create_state(&storage, &config)?;
 
             // Read transaction
             let tx_json = match tx {
@@ -165,8 +208,20 @@ pub fn run(cli: Cli) -> Result<()> {
 
             let signed_tx = parse_tx(&tx_json)?;
 
+            // Phase 2: require valid signature for user-submitted tx unless explicitly allowed
+            if signed_tx.signature.is_some() {
+                wallet::verify_signature(&signed_tx)?;
+            } else if !allow_unsigned {
+                return Err(Error::SignatureVerification(
+                    "Unsigned tx rejected (use --allow-unsigned for legacy apply)".to_string(),
+                ));
+            } else {
+                eprintln!("Warning: applying unsigned transaction (legacy/unsafe)");
+            }
+
             // Validate transaction
-            let cost_opt = metering_chain::tx::validation::validate(&state, &signed_tx, &minters)?;
+            let cost_opt =
+                metering_chain::tx::validation::validate(&state, &signed_tx, Some(&minters))?;
 
             if dry_run {
                 println!("✓ Transaction is valid");
@@ -177,7 +232,7 @@ pub fn run(cli: Cli) -> Result<()> {
             }
 
             // Apply transaction
-            state = apply(&state, &signed_tx, &minters)?;
+            state = apply(&state, &signed_tx, Some(&minters))?;
             last_tx_id += 1;
 
             // Persist transaction and state
@@ -192,8 +247,48 @@ pub fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
 
+        Commands::Wallet { sub } => match sub {
+            WalletSub::Create => {
+                fs::create_dir_all(config.get_data_dir()).map_err(|e| {
+                    Error::StateError(format!("Failed to create data directory: {}", e))
+                })?;
+                let mut wallets =
+                    metering_chain::wallet::Wallets::new(config.get_wallets_path().clone());
+                let address = wallets.create_wallet()?;
+                println!("Created wallet: {}", address);
+                Ok(())
+            }
+            WalletSub::List => {
+                let wallets =
+                    metering_chain::wallet::Wallets::new(config.get_wallets_path().clone());
+                let addrs = wallets.get_addresses();
+                if addrs.is_empty() {
+                    println!("No wallets. Run: metering-chain wallet create");
+                    return Ok(());
+                }
+                for a in addrs {
+                    println!("{}", a);
+                }
+                Ok(())
+            }
+            WalletSub::Sign { address, file } => {
+                let (state, _) = load_or_create_state(&storage, &config)?;
+                let nonce = state.get_account(&address).map(|a| a.nonce()).unwrap_or(0);
+                let kind_json = fs::read_to_string(&file).map_err(|e| {
+                    Error::InvalidTransaction(format!("Failed to read {}: {}", file, e))
+                })?;
+                let kind: metering_chain::tx::Transaction = serde_json::from_str(&kind_json)
+                    .map_err(|e| Error::InvalidTransaction(format!("Invalid kind JSON: {}", e)))?;
+                let wallets =
+                    metering_chain::wallet::Wallets::new(config.get_wallets_path().clone());
+                let signed = wallets.sign_transaction(&address, nonce, kind)?;
+                println!("{}", serde_json::to_string_pretty(&signed).unwrap());
+                Ok(())
+            }
+        },
+
         Commands::Account { address } => {
-            let (state, _) = load_or_create_state(&storage)?;
+            let (state, _) = load_or_create_state(&storage, &config)?;
 
             match state.get_account(&address) {
                 Some(account) => {
@@ -210,7 +305,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
 
         Commands::Meters { address } => {
-            let (state, _) = load_or_create_state(&storage)?;
+            let (state, _) = load_or_create_state(&storage, &config)?;
 
             let meters: Vec<MeterOutput> = state
                 .get_owner_meters(&address)
@@ -235,7 +330,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
 
         Commands::Report { address } => {
-            let (state, _) = load_or_create_state(&storage)?;
+            let (state, _) = load_or_create_state(&storage, &config)?;
 
             let reports: Vec<ReportOutput> = if let Some(addr) = address {
                 // Single account report

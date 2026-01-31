@@ -166,9 +166,7 @@ impl Storage for FileStorage {
                         .map_err(|e| Error::StateError(format!("Failed to read tx data: {}", e)))?;
 
                     if current_id >= from_tx_id {
-                        let tx: SignedTx = bincode::deserialize(&tx_buf).map_err(|e| {
-                            Error::StateError(format!("Failed to deserialize tx: {}", e))
-                        })?;
+                        let tx = crate::tx::deserialize_signed_tx_bincode(&tx_buf)?;
                         transactions.push(tx);
                     }
 

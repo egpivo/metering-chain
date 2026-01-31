@@ -35,14 +35,25 @@ cargo build --release
 ```bash
 cargo run --bin metering-chain -- init
 
-cat examples/tx/01_mint_alice.json | cargo run --bin metering-chain -- apply
-cat examples/tx/02_open_storage.json | cargo run --bin metering-chain -- apply
-cat examples/tx/03_consume_storage_unit_price.json | cargo run --bin metering-chain -- apply
-cat examples/tx/05_close_storage.json | cargo run --bin metering-chain -- apply
+# Phase 2 default: signed tx required. For legacy unsigned examples, pass --allow-unsigned.
+cat examples/tx/01_mint_alice.json | cargo run --bin metering-chain -- apply --allow-unsigned
+cat examples/tx/02_open_storage.json | cargo run --bin metering-chain -- apply --allow-unsigned
+cat examples/tx/03_consume_storage_unit_price.json | cargo run --bin metering-chain -- apply --allow-unsigned
+cat examples/tx/05_close_storage.json | cargo run --bin metering-chain -- apply --allow-unsigned
 
 cargo run --bin metering-chain -- account 0x...A11
 cargo run --bin metering-chain -- meters 0x...A11
 ```
+
+### Phase 2 signed demo (default: signed tx required)
+
+Strict flow with real signatures (no `--allow-unsigned`):
+
+```bash
+./examples/signed/run_signed_demo.sh
+```
+
+The script runs `init`, creates two wallets (authority + user), sets `METERING_CHAIN_MINTERS`, then Mint → OpenMeter → Consume → CloseMeter with signed tx. See `docs/phase2_signed_demo.md` and `examples/signed/README.md` for manual steps and kind templates.
 
 ---
 
@@ -53,12 +64,12 @@ cargo run --bin metering-chain -- meters 0x...A11
 ```bash
 # From JSON string
 echo '{"signer":"alice","nonce":0,"kind":{"Mint":{"to":"bob","amount":1000}}}' | \
-  cargo run --bin metering-chain -- apply
+  cargo run --bin metering-chain -- apply --allow-unsigned
 
 # From file
-cargo run --bin metering-chain -- apply --file examples/tx/01_mint_alice.json
+cargo run --bin metering-chain -- apply --file examples/tx/01_mint_alice.json --allow-unsigned
 
-# Dry-run (validate without applying)
+# Dry-run (validate without applying; add --allow-unsigned for unsigned tx)
 cargo run --bin metering-chain -- apply --file tx.json --dry-run
 ```
 
@@ -95,6 +106,8 @@ cargo run --bin metering-chain -- --format json account <address>
 * `docs/state_transitions.md`
 * `docs/invariants.md`
 * `docs/architecture.md`
+* `docs/phase2_signed_demo.md` – Phase 2 signed flow (wallet create → sign → apply)
+* `docs/phase_ii_implementation.md` – Phase II implementation plan and status
 
 ## Architecture
 

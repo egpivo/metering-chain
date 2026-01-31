@@ -89,6 +89,11 @@ impl Config {
         self.data_dir.join("state.json")
     }
 
+    /// Get wallets file path (Phase 2)
+    pub fn get_wallets_path(&self) -> PathBuf {
+        self.data_dir.join("wallets.json")
+    }
+
     /// Load config from environment variables
     ///
     /// Environment variables:

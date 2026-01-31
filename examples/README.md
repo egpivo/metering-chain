@@ -12,13 +12,14 @@ Notes:
 ```bash
 cargo run --bin metering-chain -- init
 
+# Phase 2 default: signed tx required. For legacy unsigned examples, pass --allow-unsigned.
 for f in examples/tx/01_mint_alice.json \
          examples/tx/02_open_storage.json \
          examples/tx/03_consume_storage_unit_price.json \
          examples/tx/05_close_storage.json
-  do
-    cat "$f" | cargo run --bin metering-chain -- apply
-  done
+do
+    cat "$f" | cargo run --bin metering-chain -- apply --allow-unsigned
+done
 ```
 
 ## Inspect state
@@ -33,6 +34,11 @@ cargo run --bin metering-chain -- report 0x0000000000000000000000000000000000000
 
 See `examples/depin/README.md` for a live-data demo that pulls on-chain reward
 distributions and converts them into `Consume` transactions.
+
+## Multi-operator demo (Helium rewards)
+
+See `examples/multi_operator/README.md` for a multi-operator flow that maps
+hotspot rewards to per-operator meters.
 
 ## Files (minimal)
 

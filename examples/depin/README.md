@@ -76,14 +76,15 @@ Notes:
 ```bash
 cargo run --bin metering-chain -- init
 
+# Phase 2 default: signed tx required. For legacy unsigned examples, pass --allow-unsigned.
 echo '{"signer":"0x0000000000000000000000000000000000000AAA","nonce":0,"kind":{"Mint":{"to":"0x0000000000000000000000000000000000000A11","amount":1000000000}}}' | \
-  cargo run --bin metering-chain -- apply
+  cargo run --bin metering-chain -- apply --allow-unsigned
 
 echo '{"signer":"0x0000000000000000000000000000000000000A11","nonce":0,"kind":{"OpenMeter":{"owner":"0x0000000000000000000000000000000000000A11","service_id":"dimo-rewards","deposit":1000}}}' | \
-  cargo run --bin metering-chain -- apply
+  cargo run --bin metering-chain -- apply --allow-unsigned
 
 while IFS= read -r line; do
-  printf '%s' "$line" | cargo run --bin metering-chain -- apply
+  printf '%s' "$line" | cargo run --bin metering-chain -- apply --allow-unsigned
   printf '\n'
 done < consume.ndjson
 ```

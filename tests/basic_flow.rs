@@ -2,6 +2,7 @@ use metering_chain::error::Error;
 use metering_chain::state::{apply, State};
 use metering_chain::storage::{FileStorage, Storage};
 use metering_chain::tx::{Pricing, SignedTx, Transaction};
+use metering_chain::wallet::{verify_signature, Wallet};
 use std::collections::HashSet;
 use tempfile::TempDir;
 
@@ -20,26 +21,23 @@ fn create_test_storage() -> (FileStorage, TempDir) {
 }
 
 fn load_or_replay_state(storage: &FileStorage) -> (State, u64) {
-    let minters = get_authorized_minters();
     match storage.load_state().unwrap() {
         Some((snapshot_state, snapshot_tx_id)) => {
-            // Load transactions after snapshot
             let txs_after_snapshot = storage.load_txs_from(snapshot_tx_id).unwrap();
             let mut current_state = snapshot_state;
             let mut current_tx_id = snapshot_tx_id;
             for tx in txs_after_snapshot {
-                current_state = apply(&current_state, &tx, &minters).unwrap();
+                current_state = apply(&current_state, &tx, None).unwrap();
                 current_tx_id += 1;
             }
             (current_state, current_tx_id)
         }
         None => {
-            // No snapshot, replay all transactions from log
             let all_txs = storage.load_txs_from(0).unwrap();
             let mut current_state = State::new();
             let mut current_tx_id = 0u64;
             for tx in all_txs {
-                current_state = apply(&current_state, &tx, &minters).unwrap();
+                current_state = apply(&current_state, &tx, None).unwrap();
                 current_tx_id += 1;
             }
             (current_state, current_tx_id)
@@ -64,7 +62,7 @@ fn test_happy_path_end_to_end() {
             amount: 1000,
         },
     );
-    state = apply(&state, &tx1, &minters).unwrap();
+    state = apply(&state, &tx1, Some(&minters)).unwrap();
     storage.append_tx(&tx1).unwrap();
     tx_id += 1;
     storage.persist_state(&state, tx_id).unwrap();
@@ -83,7 +81,7 @@ fn test_happy_path_end_to_end() {
             deposit: 100,
         },
     );
-    state = apply(&state, &tx2, &minters).unwrap();
+    state = apply(&state, &tx2, Some(&minters)).unwrap();
     storage.append_tx(&tx2).unwrap();
     tx_id += 1;
     storage.persist_state(&state, tx_id).unwrap();
@@ -108,7 +106,7 @@ fn test_happy_path_end_to_end() {
             pricing: Pricing::UnitPrice(5),
         },
     );
-    state = apply(&state, &tx3, &minters).unwrap();
+    state = apply(&state, &tx3, Some(&minters)).unwrap();
     storage.append_tx(&tx3).unwrap();
     tx_id += 1;
     storage.persist_state(&state, tx_id).unwrap();
@@ -131,7 +129,7 @@ fn test_happy_path_end_to_end() {
             pricing: Pricing::UnitPrice(5),
         },
     );
-    state = apply(&state, &tx4, &minters).unwrap();
+    state = apply(&state, &tx4, Some(&minters)).unwrap();
     storage.append_tx(&tx4).unwrap();
     tx_id += 1;
     storage.persist_state(&state, tx_id).unwrap();
@@ -151,7 +149,7 @@ fn test_happy_path_end_to_end() {
             service_id: "storage".to_string(),
         },
     );
-    state = apply(&state, &tx5, &minters).unwrap();
+    state = apply(&state, &tx5, Some(&minters)).unwrap();
     storage.append_tx(&tx5).unwrap();
     tx_id += 1;
     storage.persist_state(&state, tx_id).unwrap();
@@ -184,7 +182,7 @@ fn test_state_reconstruction() {
             amount: 1000,
         },
     );
-    state = apply(&state, &tx1, &minters).unwrap();
+    state = apply(&state, &tx1, Some(&minters)).unwrap();
     storage.append_tx(&tx1).unwrap();
     tx_id += 1;
 
@@ -197,7 +195,7 @@ fn test_state_reconstruction() {
             deposit: 100,
         },
     );
-    state = apply(&state, &tx2, &minters).unwrap();
+    state = apply(&state, &tx2, Some(&minters)).unwrap();
     storage.append_tx(&tx2).unwrap();
     tx_id += 1;
 
@@ -216,7 +214,7 @@ fn test_state_reconstruction() {
             pricing: Pricing::UnitPrice(5),
         },
     );
-    state = apply(&state, &tx3, &minters).unwrap();
+    state = apply(&state, &tx3, Some(&minters)).unwrap();
     storage.append_tx(&tx3).unwrap();
     tx_id += 1;
 
@@ -265,7 +263,7 @@ fn test_meter_reopening() {
             amount: 1000,
         },
     );
-    state = apply(&state, &tx1, &minters).unwrap();
+    state = apply(&state, &tx1, Some(&minters)).unwrap();
 
     let tx2 = SignedTx::new(
         "alice".to_string(),
@@ -276,7 +274,7 @@ fn test_meter_reopening() {
             deposit: 100,
         },
     );
-    state = apply(&state, &tx2, &minters).unwrap();
+    state = apply(&state, &tx2, Some(&minters)).unwrap();
 
     // Consume some units
     let tx3 = SignedTx::new(
@@ -289,7 +287,7 @@ fn test_meter_reopening() {
             pricing: Pricing::UnitPrice(5),
         },
     );
-    state = apply(&state, &tx3, &minters).unwrap();
+    state = apply(&state, &tx3, Some(&minters)).unwrap();
 
     // Close meter
     let tx4 = SignedTx::new(
@@ -300,7 +298,7 @@ fn test_meter_reopening() {
             service_id: "storage".to_string(),
         },
     );
-    state = apply(&state, &tx4, &minters).unwrap();
+    state = apply(&state, &tx4, Some(&minters)).unwrap();
 
     // Verify meter is inactive but totals preserved
     let meter = state.get_meter("alice", "storage").unwrap();
@@ -318,7 +316,7 @@ fn test_meter_reopening() {
             deposit: 150,
         },
     );
-    state = apply(&state, &tx5, &minters).unwrap();
+    state = apply(&state, &tx5, Some(&minters)).unwrap();
 
     // Verify: meter reactivated, totals preserved, new deposit set
     let meter = state.get_meter("alice", "storage").unwrap();
@@ -345,7 +343,7 @@ fn test_rejection_invalid_nonce() {
             amount: 1000,
         },
     );
-    state = apply(&state, &tx1, &minters).unwrap();
+    state = apply(&state, &tx1, Some(&minters)).unwrap();
     storage.append_tx(&tx1).unwrap();
 
     let tx2 = SignedTx::new(
@@ -357,7 +355,7 @@ fn test_rejection_invalid_nonce() {
             deposit: 100,
         },
     );
-    state = apply(&state, &tx2, &minters).unwrap();
+    state = apply(&state, &tx2, Some(&minters)).unwrap();
     storage.append_tx(&tx2).unwrap();
 
     // Try to consume with wrong nonce (should be 1, but using 0)
@@ -372,7 +370,7 @@ fn test_rejection_invalid_nonce() {
         },
     );
 
-    let result = apply(&state, &tx3, &minters);
+    let result = apply(&state, &tx3, Some(&minters));
     assert!(result.is_err());
     match result.unwrap_err() {
         Error::InvalidTransaction(msg) => {
@@ -398,7 +396,7 @@ fn test_rejection_insufficient_balance_deposit() {
             amount: 50,
         },
     );
-    state = apply(&state, &tx1, &minters).unwrap();
+    state = apply(&state, &tx1, Some(&minters)).unwrap();
 
     // Try to open meter with 100 deposit (insufficient balance)
     let tx2 = SignedTx::new(
@@ -411,7 +409,7 @@ fn test_rejection_insufficient_balance_deposit() {
         },
     );
 
-    let result = apply(&state, &tx2, &minters);
+    let result = apply(&state, &tx2, Some(&minters));
     assert!(result.is_err());
     match result.unwrap_err() {
         Error::InvalidTransaction(msg) => {
@@ -437,7 +435,7 @@ fn test_rejection_insufficient_balance_consumption() {
             amount: 100,
         },
     );
-    state = apply(&state, &tx1, &minters).unwrap();
+    state = apply(&state, &tx1, Some(&minters)).unwrap();
 
     let tx2 = SignedTx::new(
         "alice".to_string(),
@@ -448,7 +446,7 @@ fn test_rejection_insufficient_balance_consumption() {
             deposit: 50,
         },
     );
-    state = apply(&state, &tx2, &minters).unwrap();
+    state = apply(&state, &tx2, Some(&minters)).unwrap();
 
     // Try to consume with cost 100 (but balance is only 50)
     let tx3 = SignedTx::new(
@@ -462,7 +460,7 @@ fn test_rejection_insufficient_balance_consumption() {
         },
     );
 
-    let result = apply(&state, &tx3, &minters);
+    let result = apply(&state, &tx3, Some(&minters));
     assert!(result.is_err());
     match result.unwrap_err() {
         Error::InvalidTransaction(msg) => {
@@ -489,7 +487,7 @@ fn test_rejection_unauthorized_mint() {
         },
     );
 
-    let result = apply(&state, &tx, &minters);
+    let result = apply(&state, &tx, Some(&minters));
     assert!(result.is_err());
     match result.unwrap_err() {
         Error::InvalidTransaction(msg) => {
@@ -515,7 +513,7 @@ fn test_rejection_consume_inactive_meter() {
             amount: 1000,
         },
     );
-    state = apply(&state, &tx1, &minters).unwrap();
+    state = apply(&state, &tx1, Some(&minters)).unwrap();
 
     let tx2 = SignedTx::new(
         "alice".to_string(),
@@ -526,7 +524,7 @@ fn test_rejection_consume_inactive_meter() {
             deposit: 100,
         },
     );
-    state = apply(&state, &tx2, &minters).unwrap();
+    state = apply(&state, &tx2, Some(&minters)).unwrap();
 
     let tx3 = SignedTx::new(
         "alice".to_string(),
@@ -536,7 +534,7 @@ fn test_rejection_consume_inactive_meter() {
             service_id: "storage".to_string(),
         },
     );
-    state = apply(&state, &tx3, &minters).unwrap();
+    state = apply(&state, &tx3, Some(&minters)).unwrap();
 
     // Try to consume on inactive meter
     let tx4 = SignedTx::new(
@@ -550,7 +548,7 @@ fn test_rejection_consume_inactive_meter() {
         },
     );
 
-    let result = apply(&state, &tx4, &minters);
+    let result = apply(&state, &tx4, Some(&minters));
     assert!(result.is_err());
     match result.unwrap_err() {
         Error::InvalidTransaction(msg) => {
@@ -576,7 +574,7 @@ fn test_rejection_wrong_signer() {
             amount: 1000,
         },
     );
-    state = apply(&state, &tx1, &minters).unwrap();
+    state = apply(&state, &tx1, Some(&minters)).unwrap();
 
     let tx2 = SignedTx::new(
         "authority".to_string(),
@@ -586,7 +584,7 @@ fn test_rejection_wrong_signer() {
             amount: 1000,
         },
     );
-    state = apply(&state, &tx2, &minters).unwrap();
+    state = apply(&state, &tx2, Some(&minters)).unwrap();
 
     let tx3 = SignedTx::new(
         "alice".to_string(),
@@ -597,7 +595,7 @@ fn test_rejection_wrong_signer() {
             deposit: 100,
         },
     );
-    state = apply(&state, &tx3, &minters).unwrap();
+    state = apply(&state, &tx3, Some(&minters)).unwrap();
 
     // Bob tries to consume on alice's meter
     let tx4 = SignedTx::new(
@@ -611,7 +609,7 @@ fn test_rejection_wrong_signer() {
         },
     );
 
-    let result = apply(&state, &tx4, &minters);
+    let result = apply(&state, &tx4, Some(&minters));
     assert!(result.is_err());
     match result.unwrap_err() {
         Error::InvalidTransaction(msg) => {
@@ -637,7 +635,7 @@ fn test_rejection_zero_units() {
             amount: 1000,
         },
     );
-    state = apply(&state, &tx1, &minters).unwrap();
+    state = apply(&state, &tx1, Some(&minters)).unwrap();
 
     let tx2 = SignedTx::new(
         "alice".to_string(),
@@ -648,7 +646,7 @@ fn test_rejection_zero_units() {
             deposit: 100,
         },
     );
-    state = apply(&state, &tx2, &minters).unwrap();
+    state = apply(&state, &tx2, Some(&minters)).unwrap();
 
     // Try to consume 0 units
     let tx3 = SignedTx::new(
@@ -662,7 +660,7 @@ fn test_rejection_zero_units() {
         },
     );
 
-    let result = apply(&state, &tx3, &minters);
+    let result = apply(&state, &tx3, Some(&minters));
     assert!(result.is_err());
     match result.unwrap_err() {
         Error::InvalidTransaction(msg) => {
@@ -688,7 +686,7 @@ fn test_fixed_cost_pricing() {
             amount: 1000,
         },
     );
-    state = apply(&state, &tx1, &minters).unwrap();
+    state = apply(&state, &tx1, Some(&minters)).unwrap();
 
     let tx2 = SignedTx::new(
         "alice".to_string(),
@@ -699,7 +697,7 @@ fn test_fixed_cost_pricing() {
             deposit: 100,
         },
     );
-    state = apply(&state, &tx2, &minters).unwrap();
+    state = apply(&state, &tx2, Some(&minters)).unwrap();
 
     // Consume with fixed cost (regardless of units)
     let tx3 = SignedTx::new(
@@ -712,7 +710,7 @@ fn test_fixed_cost_pricing() {
             pricing: Pricing::FixedCost(50), // Fixed cost: 50
         },
     );
-    state = apply(&state, &tx3, &minters).unwrap();
+    state = apply(&state, &tx3, Some(&minters)).unwrap();
 
     // Verify: cost is 50 regardless of units
     assert_eq!(state.get_account("alice").unwrap().balance(), 850); // 1000 - 100 - 50
@@ -737,7 +735,7 @@ fn test_multiple_meters() {
             amount: 2000,
         },
     );
-    state = apply(&state, &tx1, &minters).unwrap();
+    state = apply(&state, &tx1, Some(&minters)).unwrap();
 
     // Open two different meters
     let tx2 = SignedTx::new(
@@ -749,7 +747,7 @@ fn test_multiple_meters() {
             deposit: 100,
         },
     );
-    state = apply(&state, &tx2, &minters).unwrap();
+    state = apply(&state, &tx2, Some(&minters)).unwrap();
 
     let tx3 = SignedTx::new(
         "alice".to_string(),
@@ -760,7 +758,7 @@ fn test_multiple_meters() {
             deposit: 200,
         },
     );
-    state = apply(&state, &tx3, &minters).unwrap();
+    state = apply(&state, &tx3, Some(&minters)).unwrap();
 
     // Consume on both meters
     let tx4 = SignedTx::new(
@@ -773,7 +771,7 @@ fn test_multiple_meters() {
             pricing: Pricing::UnitPrice(5),
         },
     );
-    state = apply(&state, &tx4, &minters).unwrap();
+    state = apply(&state, &tx4, Some(&minters)).unwrap();
 
     let tx5 = SignedTx::new(
         "alice".to_string(),
@@ -785,7 +783,7 @@ fn test_multiple_meters() {
             pricing: Pricing::FixedCost(30),
         },
     );
-    state = apply(&state, &tx5, &minters).unwrap();
+    state = apply(&state, &tx5, Some(&minters)).unwrap();
 
     // Verify both meters are independent
     let storage_meter = state.get_meter("alice", "storage").unwrap();
@@ -797,4 +795,38 @@ fn test_multiple_meters() {
     assert_eq!(api_meter.total_spent(), 30);
 
     assert_eq!(state.get_account("alice").unwrap().balance(), 1620); // 2000 - 100 - 200 - 50 - 30
+}
+
+/// Phase 2: signed tx apply success (wallet sign → verify → apply)
+#[test]
+fn test_phase2_signed_apply_success() {
+    let wallet = Wallet::new_random();
+    let address = wallet.address().to_string();
+    let mut minters = HashSet::new();
+    minters.insert(address.clone());
+
+    let kind = Transaction::Mint {
+        to: address.clone(),
+        amount: 1000,
+    };
+    let signed_tx = wallet.sign_transaction(0, kind).unwrap();
+    verify_signature(&signed_tx).unwrap();
+
+    let state = apply(&State::new(), &signed_tx, Some(&minters)).unwrap();
+    assert_eq!(state.get_account(&address).unwrap().balance(), 1000);
+}
+
+/// Phase 2: unsigned tx rejected by verify_signature (no --allow-unsigned path)
+#[test]
+fn test_phase2_unsigned_rejected() {
+    let tx = SignedTx::new(
+        "alice".to_string(),
+        0,
+        Transaction::Mint {
+            to: "bob".to_string(),
+            amount: 100,
+        },
+    );
+    assert!(tx.signature.is_none());
+    assert!(verify_signature(&tx).is_err());
 }

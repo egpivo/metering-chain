@@ -1,0 +1,7 @@
+# helium_rewards_to_consume.py: stdlib only (no deps)
+# analyze_rewards.py
+polars>=0.19
+matplotlib>=3.7
+seaborn>=0.12
+# fetch_dune_iot_transfers.py (optional)
+dune_spice>=0.1
