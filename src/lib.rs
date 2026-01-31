@@ -5,6 +5,7 @@ pub mod logger;
 pub mod state;
 pub mod storage;
 pub mod tx;
+pub mod wallet;
 
 use sha2::{Digest, Sha256};
 

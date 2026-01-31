@@ -31,14 +31,24 @@ pub enum Transaction {
     CloseMeter { owner: String, service_id: String },
 }
 
-/// Signed transaction wrapper with signer and nonce
+/// Payload used for canonical signing (signer + nonce + kind, no signature).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SignablePayload {
+    pub signer: String,
+    pub nonce: u64,
+    #[serde(rename = "kind")]
+    pub kind: Transaction,
+}
+
+/// Signed transaction wrapper with signer, nonce, and optional signature (Phase 2).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SignedTx {
     pub signer: String,
     pub nonce: u64,
     pub kind: Transaction,
-    // TODO: Add signature field when implementing cryptographic signatures
-    // pub signature: Vec<u8>,
+    /// Ed25519 signature over canonical payload. None = legacy/unsigned (Phase 1 replay).
+    #[serde(default)]
+    pub signature: Option<Vec<u8>>,
 }
 
 impl SignedTx {
@@ -47,6 +57,18 @@ impl SignedTx {
             signer,
             nonce,
             kind,
+            signature: None,
         }
+    }
+
+    /// Canonical bytes to sign (bincode of signer, nonce, kind). Verification must use the same format.
+    pub fn message_to_sign(&self) -> crate::error::Result<Vec<u8>> {
+        let payload = SignablePayload {
+            signer: self.signer.clone(),
+            nonce: self.nonce,
+            kind: self.kind.clone(),
+        };
+        bincode::serialize(&payload)
+            .map_err(|e| crate::error::Error::InvalidTransaction(e.to_string()))
     }
 }
