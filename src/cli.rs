@@ -43,6 +43,10 @@ pub enum Commands {
         /// Dry-run: validate but don't apply
         #[arg(long)]
         dry_run: bool,
+
+        /// Allow unsigned transactions (legacy/Phase 1). Signed tx still verified.
+        #[arg(long)]
+        allow_unsigned: bool,
     },
 
     /// Wallet operations (Phase 2: create, list, sign)
@@ -187,7 +191,12 @@ pub fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
 
-        Commands::Apply { tx, file, dry_run } => {
+        Commands::Apply {
+            tx,
+            file,
+            dry_run,
+            allow_unsigned,
+        } => {
             // Load current state
             let (mut state, mut last_tx_id) = load_or_create_state(&storage, &config)?;
 
@@ -199,8 +208,16 @@ pub fn run(cli: Cli) -> Result<()> {
 
             let signed_tx = parse_tx(&tx_json)?;
 
-            // Phase 2: require valid signature for user-submitted tx (replay from log does not call this)
-            wallet::verify_signature(&signed_tx)?;
+            // Phase 2: require valid signature for user-submitted tx unless explicitly allowed
+            if signed_tx.signature.is_some() {
+                wallet::verify_signature(&signed_tx)?;
+            } else if !allow_unsigned {
+                return Err(Error::SignatureVerification(
+                    "Unsigned tx rejected (use --allow-unsigned for legacy apply)".to_string(),
+                ));
+            } else {
+                eprintln!("Warning: applying unsigned transaction (legacy/unsafe)");
+            }
 
             // Validate transaction
             let cost_opt =

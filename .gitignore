@@ -23,3 +23,4 @@ target
 # Local design and planning files (not for version control)
 .local/
 .metering-chain/
+.env

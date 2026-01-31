@@ -2,6 +2,7 @@ use metering_chain::error::Error;
 use metering_chain::state::{apply, State};
 use metering_chain::storage::{FileStorage, Storage};
 use metering_chain::tx::{Pricing, SignedTx, Transaction};
+use metering_chain::wallet::{verify_signature, Wallet};
 use std::collections::HashSet;
 use tempfile::TempDir;
 
@@ -794,4 +795,38 @@ fn test_multiple_meters() {
     assert_eq!(api_meter.total_spent(), 30);
 
     assert_eq!(state.get_account("alice").unwrap().balance(), 1620); // 2000 - 100 - 200 - 50 - 30
+}
+
+/// Phase 2: signed tx apply success (wallet sign → verify → apply)
+#[test]
+fn test_phase2_signed_apply_success() {
+    let wallet = Wallet::new_random();
+    let address = wallet.address().to_string();
+    let mut minters = HashSet::new();
+    minters.insert(address.clone());
+
+    let kind = Transaction::Mint {
+        to: address.clone(),
+        amount: 1000,
+    };
+    let signed_tx = wallet.sign_transaction(0, kind).unwrap();
+    verify_signature(&signed_tx).unwrap();
+
+    let state = apply(&State::new(), &signed_tx, Some(&minters)).unwrap();
+    assert_eq!(state.get_account(&address).unwrap().balance(), 1000);
+}
+
+/// Phase 2: unsigned tx rejected by verify_signature (no --allow-unsigned path)
+#[test]
+fn test_phase2_unsigned_rejected() {
+    let tx = SignedTx::new(
+        "alice".to_string(),
+        0,
+        Transaction::Mint {
+            to: "bob".to_string(),
+            amount: 100,
+        },
+    );
+    assert!(tx.signature.is_none());
+    assert!(verify_signature(&tx).is_err());
 }
