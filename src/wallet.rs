@@ -2,6 +2,7 @@
 //! Domain layer does not depend on this.
 
 use crate::error::{Error, Result};
+use crate::tx::transaction::PAYLOAD_VERSION_V2;
 use crate::tx::{SignedTx, Transaction};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use rand::rngs::OsRng;
@@ -38,9 +39,37 @@ impl Wallet {
         sig.to_bytes().to_vec()
     }
 
-    /// Build SignedTx with correct nonce and attach signature.
+    /// Build SignedTx (v1) with correct nonce and attach signature.
     pub fn sign_transaction(&self, nonce: u64, kind: Transaction) -> Result<SignedTx> {
         let tx = SignedTx::new(self.address.clone(), nonce, kind);
+        let message = tx.message_to_sign()?;
+        let signature = self.sign_bytes(&message);
+        Ok(SignedTx {
+            signature: Some(signature),
+            ..tx
+        })
+    }
+
+    /// Build SignedTx v2 for delegated consume: nonce_account=Some(owner), valid_at, delegation_proof.
+    /// Signer is the delegate; owner is from kind. Caller must pass owner nonce and proof bytes.
+    pub fn sign_transaction_v2(
+        &self,
+        nonce: u64,
+        nonce_account: String,
+        valid_at: u64,
+        delegation_proof: Vec<u8>,
+        kind: Transaction,
+    ) -> Result<SignedTx> {
+        let tx = SignedTx {
+            payload_version: Some(PAYLOAD_VERSION_V2),
+            signer: self.address.clone(),
+            nonce,
+            nonce_account: Some(nonce_account),
+            valid_at: Some(valid_at),
+            delegation_proof: Some(delegation_proof),
+            kind,
+            signature: None,
+        };
         let message = tx.message_to_sign()?;
         let signature = self.sign_bytes(&message);
         Ok(SignedTx {
@@ -71,8 +100,19 @@ pub fn address_to_public_key(address: &str) -> Option<[u8; 32]> {
     Some(arr)
 }
 
-/// Verify SignedTx: Phase 2 requires a valid signature. Replay from tx.log does not call this.
+/// Hard gate: delegated Consume must use payload_version=2. Call before signature verification.
+pub fn enforce_delegated_consume_v2(tx: &SignedTx) -> Result<()> {
+    if tx.is_delegated_consume() {
+        if tx.effective_payload_version() != PAYLOAD_VERSION_V2 {
+            return Err(Error::DelegatedConsumeRequiresV2);
+        }
+    }
+    Ok(())
+}
+
+/// Verify SignedTx: Phase 2/3 requires valid signature. Enforces delegated-consume v2 gate, then version-aware message verify.
 pub fn verify_signature(tx: &SignedTx) -> Result<()> {
+    enforce_delegated_consume_v2(tx)?;
     let sig_bytes = tx.signature.as_ref().ok_or_else(|| {
         Error::SignatureVerification("Signed transaction required (Phase 2)".to_string())
     })?;
@@ -146,6 +186,23 @@ impl Wallets {
             .get(address)
             .ok_or_else(|| Error::InvalidTransaction(format!("Wallet not found: {}", address)))?;
         wallet.sign_transaction(nonce, kind)
+    }
+
+    /// Delegated sign: signer is address, nonce_account (owner) and nonce from coordinator, valid_at and proof from caller.
+    pub fn sign_transaction_v2(
+        &self,
+        address: &str,
+        nonce: u64,
+        nonce_account: String,
+        valid_at: u64,
+        delegation_proof: Vec<u8>,
+        kind: Transaction,
+    ) -> Result<SignedTx> {
+        let wallet = self
+            .by_address
+            .get(address)
+            .ok_or_else(|| Error::InvalidTransaction(format!("Wallet not found: {}", address)))?;
+        wallet.sign_transaction_v2(nonce, nonce_account, valid_at, delegation_proof, kind)
     }
 
     fn load_from_file(&mut self) -> Result<()> {

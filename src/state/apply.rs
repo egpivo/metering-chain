@@ -1,16 +1,18 @@
 use crate::error::{Error, Result};
 use crate::state::{MeterKey, State};
-use crate::tx::validation::validate;
+use crate::tx::validation::{validate, ValidationContext};
 use crate::tx::{SignedTx, Transaction};
 use std::collections::HashSet;
 
 /// When authorized_minters is None (replay), mint authorization is skipped for deterministic replay.
+/// ctx must be ValidationContext::replay() when replaying from log; Live(now, max_age) when applying new tx.
 pub fn apply(
     state: &State,
     tx: &SignedTx,
+    ctx: &ValidationContext,
     authorized_minters: Option<&HashSet<String>>,
 ) -> Result<State> {
-    let cost_opt = validate(state, tx, authorized_minters)?;
+    let cost_opt = validate(state, tx, ctx, authorized_minters)?;
     let mut new_state = state.clone();
     match &tx.kind {
         Transaction::Mint { to, amount } => {
@@ -30,7 +32,8 @@ pub fn apply(
             pricing: _,
         } => {
             let cost = cost_opt.expect("validate_consume should return cost");
-            apply_consume(&mut new_state, owner, service_id, *units, cost, &tx.signer)?;
+            let nonce_account = tx.nonce_account.as_deref().unwrap_or(&tx.signer);
+            apply_consume(&mut new_state, owner, service_id, *units, cost, nonce_account)?;
         }
         Transaction::CloseMeter { owner, service_id } => {
             apply_close_meter(&mut new_state, owner, service_id, &tx.signer)?;
@@ -130,7 +133,12 @@ fn apply_close_meter(state: &mut State, owner: &str, service_id: &str, signer: &
 mod tests {
     use super::*;
     use crate::state::{Account, Meter};
+    use crate::tx::validation::ValidationContext;
     use crate::tx::{Pricing, Transaction};
+
+    fn replay_ctx() -> ValidationContext {
+        ValidationContext::replay()
+    }
 
     fn create_authorized_minters() -> HashSet<String> {
         let mut minters = HashSet::new();
@@ -151,7 +159,7 @@ mod tests {
             },
         );
 
-        let new_state = apply(&state, &tx, Some(&minters)).unwrap();
+        let new_state = apply(&state, &tx, &replay_ctx(), Some(&minters)).unwrap();
         let account = new_state.get_account("alice").unwrap();
         assert_eq!(account.balance(), 1000);
     }
@@ -174,7 +182,7 @@ mod tests {
             },
         );
 
-        let new_state = apply(&state, &tx, Some(&minters)).unwrap();
+        let new_state = apply(&state, &tx, &replay_ctx(), Some(&minters)).unwrap();
 
         // Check account balance decreased
         let account = new_state.get_account("alice").unwrap();
@@ -213,7 +221,7 @@ mod tests {
             },
         );
 
-        let new_state = apply(&state, &tx, Some(&minters)).unwrap();
+        let new_state = apply(&state, &tx, &replay_ctx(), Some(&minters)).unwrap();
 
         // Check meter reactivated with preserved totals
         let meter = new_state.get_meter("alice", "storage").unwrap();
@@ -244,7 +252,7 @@ mod tests {
             },
         );
 
-        let new_state = apply(&state, &tx, Some(&minters)).unwrap();
+        let new_state = apply(&state, &tx, &replay_ctx(), Some(&minters)).unwrap();
 
         // Check account balance decreased
         let account = new_state.get_account("alice").unwrap();
@@ -276,7 +284,7 @@ mod tests {
             },
         );
 
-        let new_state = apply(&state, &tx, Some(&minters)).unwrap();
+        let new_state = apply(&state, &tx, &replay_ctx(), Some(&minters)).unwrap();
 
         // Check account balance increased (deposit returned)
         let account = new_state.get_account("alice").unwrap();
@@ -304,7 +312,7 @@ mod tests {
             },
         );
 
-        let result = apply(&state, &tx, Some(&minters));
+        let result = apply(&state, &tx, &replay_ctx(), Some(&minters));
         assert!(result.is_err());
     }
 
@@ -322,7 +330,7 @@ mod tests {
                 amount: 1000,
             },
         );
-        state = apply(&state, &tx1, Some(&minters)).unwrap();
+        state = apply(&state, &tx1, &replay_ctx(), Some(&minters)).unwrap();
         assert_eq!(state.get_account("alice").unwrap().balance(), 1000);
 
         // 2. Open meter
@@ -335,7 +343,7 @@ mod tests {
                 deposit: 100,
             },
         );
-        state = apply(&state, &tx2, Some(&minters)).unwrap();
+        state = apply(&state, &tx2, &replay_ctx(), Some(&minters)).unwrap();
         assert_eq!(state.get_account("alice").unwrap().balance(), 900);
 
         // 3. Consume
@@ -349,7 +357,7 @@ mod tests {
                 pricing: Pricing::UnitPrice(5),
             },
         );
-        state = apply(&state, &tx3, Some(&minters)).unwrap();
+        state = apply(&state, &tx3, &replay_ctx(), Some(&minters)).unwrap();
         assert_eq!(state.get_account("alice").unwrap().balance(), 850);
         assert_eq!(
             state.get_meter("alice", "storage").unwrap().total_units(),
@@ -365,7 +373,7 @@ mod tests {
                 service_id: "storage".to_string(),
             },
         );
-        state = apply(&state, &tx4, Some(&minters)).unwrap();
+        state = apply(&state, &tx4, &replay_ctx(), Some(&minters)).unwrap();
         assert_eq!(state.get_account("alice").unwrap().balance(), 950); // 850 + 100 deposit
         assert!(!state.get_meter("alice", "storage").unwrap().is_active());
     }

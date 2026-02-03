@@ -3,6 +3,7 @@ use metering_chain::config::Config;
 use metering_chain::error::{Error, Result};
 use metering_chain::state::{apply, State};
 use metering_chain::storage::{FileStorage, Storage};
+use metering_chain::tx::validation::ValidationContext;
 use metering_chain::tx::SignedTx;
 use metering_chain::wallet;
 use std::collections::HashSet;
@@ -91,6 +92,22 @@ pub enum WalletSub {
         /// JSON file with transaction kind only, e.g. {"Consume":{"owner":"0x...","service_id":"s","units":1,"pricing":{"UnitPrice":2}}}
         #[arg(short, long)]
         file: String,
+
+        /// Delegated sign: consume on behalf of this owner (nonce_account). Requires --nonce and proof/valid_at.
+        #[arg(long)]
+        for_owner: Option<String>,
+
+        /// Nonce to use (required for delegated sign; otherwise read from state for signer/owner)
+        #[arg(long)]
+        nonce: Option<u64>,
+
+        /// Reference time (valid_at) for delegated consume. Default: current Unix time.
+        #[arg(long)]
+        valid_at: Option<u64>,
+
+        /// Path to file containing delegation proof bytes (bincode: { iat, exp, issuer, audience }). Required for --for-owner.
+        #[arg(long)]
+        proof_file: Option<String>,
     },
 }
 
@@ -101,11 +118,12 @@ pub fn load_or_create_state(storage: &FileStorage, _config: &Config) -> Result<(
             let txs = storage.load_txs_from(last_tx_id + 1)?;
             let mut current_state = state;
             let mut current_tx_id = last_tx_id;
+            let replay_ctx = ValidationContext::replay();
             for tx in txs {
                 if tx.signature.is_some() {
                     wallet::verify_signature(&tx)?;
                 }
-                current_state = apply(&current_state, &tx, None)?;
+                current_state = apply(&current_state, &tx, &replay_ctx, None)?;
                 current_tx_id += 1;
             }
 
@@ -219,9 +237,17 @@ pub fn run(cli: Cli) -> Result<()> {
                 eprintln!("Warning: applying unsigned transaction (legacy/unsafe)");
             }
 
+            let now = metering_chain::current_timestamp().max(0) as u64;
+            const DEFAULT_MAX_AGE: u64 = 300;
+            let live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+
             // Validate transaction
-            let cost_opt =
-                metering_chain::tx::validation::validate(&state, &signed_tx, Some(&minters))?;
+            let cost_opt = metering_chain::tx::validation::validate(
+                &state,
+                &signed_tx,
+                &live_ctx,
+                Some(&minters),
+            )?;
 
             if dry_run {
                 println!("✓ Transaction is valid");
@@ -232,7 +258,7 @@ pub fn run(cli: Cli) -> Result<()> {
             }
 
             // Apply transaction
-            state = apply(&state, &signed_tx, Some(&minters))?;
+            state = apply(&state, &signed_tx, &live_ctx, Some(&minters))?;
             last_tx_id += 1;
 
             // Persist transaction and state
@@ -271,9 +297,15 @@ pub fn run(cli: Cli) -> Result<()> {
                 }
                 Ok(())
             }
-            WalletSub::Sign { address, file } => {
+            WalletSub::Sign {
+                address,
+                file,
+                for_owner,
+                nonce,
+                valid_at,
+                proof_file,
+            } => {
                 let (state, _) = load_or_create_state(&storage, &config)?;
-                let nonce = state.get_account(&address).map(|a| a.nonce()).unwrap_or(0);
                 let kind_json = fs::read_to_string(&file).map_err(|e| {
                     Error::InvalidTransaction(format!("Failed to read {}: {}", file, e))
                 })?;
@@ -281,7 +313,37 @@ pub fn run(cli: Cli) -> Result<()> {
                     .map_err(|e| Error::InvalidTransaction(format!("Invalid kind JSON: {}", e)))?;
                 let wallets =
                     metering_chain::wallet::Wallets::new(config.get_wallets_path().clone());
-                let signed = wallets.sign_transaction(&address, nonce, kind)?;
+
+                let signed = if let Some(owner) = for_owner {
+                    let nonce_val = nonce.ok_or_else(|| {
+                        Error::InvalidTransaction("Delegated sign requires --nonce".to_string())
+                    })?;
+                    let proof_bytes = match &proof_file {
+                        Some(path) => fs::read(path).map_err(|e| {
+                            Error::InvalidTransaction(format!("Failed to read proof file: {}", e))
+                        })?,
+                        None => {
+                            return Err(Error::InvalidTransaction(
+                                "Delegated sign requires --proof-file".to_string(),
+                            ));
+                        }
+                    };
+                    let valid_at_sec = valid_at
+                        .unwrap_or_else(|| metering_chain::current_timestamp().max(0) as u64);
+                    wallets.sign_transaction_v2(
+                        &address,
+                        nonce_val,
+                        owner,
+                        valid_at_sec,
+                        proof_bytes,
+                        kind,
+                    )?
+                } else {
+                    let nonce_val = nonce.unwrap_or_else(|| {
+                        state.get_account(&address).map(|a| a.nonce()).unwrap_or(0)
+                    });
+                    wallets.sign_transaction(&address, nonce_val, kind)?
+                };
                 println!("{}", serde_json::to_string_pretty(&signed).unwrap());
                 Ok(())
             }
