@@ -3,6 +3,7 @@
 
 use crate::error::{Error, Result};
 use crate::tx::transaction::PAYLOAD_VERSION_V2;
+use crate::tx::validation::{build_signed_proof, delegation_claims_to_sign, DelegationProofMinimal};
 use crate::tx::{SignedTx, Transaction};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use rand::rngs::OsRng;
@@ -48,6 +49,13 @@ impl Wallet {
             signature: Some(signature),
             ..tx
         })
+    }
+
+    /// Create signed delegation proof bytes (owner signs claims). Call as owner wallet.
+    pub fn sign_delegation_proof(&self, claims: &DelegationProofMinimal) -> Vec<u8> {
+        let message = delegation_claims_to_sign(claims);
+        let signature = self.sign_bytes(&message);
+        build_signed_proof(claims, signature)
     }
 
     /// Build SignedTx v2 for delegated consume: nonce_account=Some(owner), valid_at, delegation_proof.

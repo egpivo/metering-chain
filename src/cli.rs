@@ -105,9 +105,40 @@ pub enum WalletSub {
         #[arg(long)]
         valid_at: Option<u64>,
 
-        /// Path to file containing delegation proof bytes (bincode: { iat, exp, issuer, audience }). Required for --for-owner.
+        /// Path to file containing delegation proof bytes (owner-signed; use create-delegation-proof). Required for --for-owner.
         #[arg(long)]
         proof_file: Option<String>,
+    },
+
+    /// Create owner-signed delegation proof (write to file). Issuer = owner address, audience = delegate.
+    CreateDelegationProof {
+        /// Owner wallet address (issuer; must exist in wallets)
+        #[arg(short, long)]
+        address: String,
+
+        /// Delegate address (audience)
+        #[arg(short, long)]
+        audience: String,
+
+        /// Issued-at time (Unix seconds)
+        #[arg(long)]
+        iat: u64,
+
+        /// Expiry time (Unix seconds)
+        #[arg(long)]
+        exp: u64,
+
+        /// Optional caveat: max units for this capability
+        #[arg(long)]
+        max_units: Option<u64>,
+
+        /// Optional caveat: max cost for this capability
+        #[arg(long)]
+        max_cost: Option<u64>,
+
+        /// Output file path for proof bytes
+        #[arg(short, long)]
+        output: String,
     },
 }
 
@@ -345,6 +376,35 @@ pub fn run(cli: Cli) -> Result<()> {
                     wallets.sign_transaction(&address, nonce_val, kind)?
                 };
                 println!("{}", serde_json::to_string_pretty(&signed).unwrap());
+                Ok(())
+            }
+            WalletSub::CreateDelegationProof {
+                address,
+                audience,
+                iat,
+                exp,
+                max_units,
+                max_cost,
+                output,
+            } => {
+                let wallets =
+                    metering_chain::wallet::Wallets::new(config.get_wallets_path().clone());
+                let wallet = wallets.get_wallet(&address).ok_or_else(|| {
+                    Error::InvalidTransaction(format!("Wallet not found: {}", address))
+                })?;
+                let claims = metering_chain::tx::DelegationProofMinimal {
+                    iat,
+                    exp,
+                    issuer: address.clone(),
+                    audience: audience.clone(),
+                    max_units: max_units.clone(),
+                    max_cost: max_cost.clone(),
+                };
+                let proof_bytes = wallet.sign_delegation_proof(&claims);
+                fs::write(output, &proof_bytes).map_err(|e| {
+                    Error::StateError(format!("Failed to write proof file: {}", e))
+                })?;
+                println!("Created signed delegation proof: {} bytes", proof_bytes.len());
                 Ok(())
             }
         },

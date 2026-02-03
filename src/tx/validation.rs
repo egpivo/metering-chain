@@ -1,6 +1,8 @@
 use crate::error::{Error, Result};
 use crate::state::State;
 use crate::tx::{Pricing, SignedTx, Transaction};
+use crate::wallet;
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
 
 /// Live = use wall clock (now, max_age). Replay = no wall clock, only signed reference_time.
@@ -38,39 +40,104 @@ impl ValidationContext {
     }
 }
 
-/// Minimal delegation proof claims (v1: bincode). Full UCAN/JWT can be added later.
+/// Minimal delegation proof claims. Must be signed by owner (issuer); see SignedDelegationProof.
 #[derive(Debug, Clone, serde::Serialize, Deserialize)]
 pub struct DelegationProofMinimal {
     pub iat: u64,
     pub exp: u64,
     pub issuer: String,
     pub audience: String,
+    /// Optional caveat: max units for this capability (consumed_units + this_tx <= limit).
+    #[serde(default)]
+    pub max_units: Option<u64>,
+    /// Optional caveat: max cost for this capability (consumed_cost + this_tx <= limit).
+    #[serde(default)]
+    pub max_cost: Option<u64>,
 }
 
-/// Build proof bytes for testing (bincode serialized DelegationProofMinimal).
-pub fn make_minimal_proof_bytes(iat: u64, exp: u64, issuer: &str, audience: &str) -> Vec<u8> {
-    let p = DelegationProofMinimal {
-        iat,
-        exp,
-        issuer: issuer.to_string(),
-        audience: audience.to_string(),
-    };
-    bincode::serialize(&p).unwrap()
+/// Deterministic capability ID per M2: sha256(canonical_proof_bytes), lowercase hex.
+/// canonical_proof_bytes = exact bytes from delegation_proof field in tx.
+pub fn capability_id(proof_bytes: &[u8]) -> String {
+    hex::encode(crate::sha256_digest(proof_bytes)).to_lowercase()
 }
 
-/// Normalize principal to chain address. If 0x+hex (32 bytes), return 0x+lowercase hex; else return lowercase for comparison.
+/// Signed delegation proof: owner (issuer) signs canonical bincode(claims). Prevents forgery.
+#[derive(Debug, Clone, serde::Serialize, Deserialize)]
+pub struct SignedDelegationProof {
+    pub claims: DelegationProofMinimal,
+    /// Ed25519 signature by issuer (owner) over bincode(claims).
+    pub signature: Vec<u8>,
+}
+
+/// Build signed proof bytes. Owner must sign canonical bincode(claims); pass signature from wallet.sign_bytes(bincode(claims)).
+pub fn build_signed_proof(claims: &DelegationProofMinimal, signature: Vec<u8>) -> Vec<u8> {
+    bincode::serialize(&SignedDelegationProof {
+        claims: claims.clone(),
+        signature,
+    })
+    .unwrap()
+}
+
+/// Canonical message the owner must sign to create a valid proof.
+pub fn delegation_claims_to_sign(claims: &DelegationProofMinimal) -> Vec<u8> {
+    bincode::serialize(claims).unwrap()
+}
+
+/// Multicodec varint for Ed25519 public key (0xed = 237): encoded as two bytes 0xed, 0x01.
+const MULTICODEC_ED25519_HEADER: [u8; 2] = [0xed, 0x01];
+
+/// Convert principal to chain address. Rejects unconvertible principals per M2.
+/// Accepted: (1) 0x + 64 hex chars (32-byte Ed25519 pubkey); (2) did:key with Ed25519 (z6Mk...).
 pub fn principal_to_chain_address(principal: &str) -> Result<String> {
     let s = principal.trim();
+
+    // did:key:z<base58btc> — multibase value must start with z (base58-btc)
+    if let Some(mb_value) = s.strip_prefix("did:key:") {
+        let mb = mb_value.trim();
+        let multibase_body = mb
+            .strip_prefix('z')
+            .ok_or_else(|| {
+                Error::PrincipalBindingFailed(
+                    "did:key multibase value must start with 'z' (base58-btc)".to_string(),
+                )
+            })?;
+        let decoded = bs58::decode(multibase_body)
+            .into_vec()
+            .map_err(|e| {
+                Error::PrincipalBindingFailed(format!("did:key base58 decode failed: {}", e))
+            })?;
+        // Multicodec varint for Ed25519: 0xed 0x01 (2 bytes), then 32-byte key. Total 34 bytes.
+        if decoded.len() < 34
+            || decoded[0] != MULTICODEC_ED25519_HEADER[0]
+            || decoded[1] != MULTICODEC_ED25519_HEADER[1]
+        {
+            return Err(Error::PrincipalBindingFailed(
+                "did:key only supports Ed25519 (multicodec 0xed); wrong header or length".to_string(),
+            ));
+        }
+        let arr: [u8; 32] = decoded[2..34]
+            .try_into()
+            .map_err(|_| {
+                Error::PrincipalBindingFailed("did:key Ed25519 key must be 32 bytes".to_string())
+            })?;
+        return Ok(format!("0x{}", hex::encode(arr)));
+    }
+
+    // 0x + 64 hex chars (32-byte Ed25519 pubkey)
     let hex_part = match s.strip_prefix("0x") {
         Some(h) => h,
-        None => return Ok(s.to_lowercase()),
+        None => {
+            return Err(Error::PrincipalBindingFailed(
+                "Principal must be 0x+hex (32-byte) or did:key (Ed25519)".to_string(),
+            ));
+        }
     };
     let hex_lower = hex_part.to_lowercase();
     let bytes = hex::decode(&hex_lower).map_err(|e| {
         Error::PrincipalBindingFailed(format!("Invalid hex: {}", e))
     })?;
     let arr: [u8; 32] = bytes.try_into().map_err(|_| {
-        Error::PrincipalBindingFailed("Expected 32-byte pubkey".to_string())
+        Error::PrincipalBindingFailed("Expected 32-byte pubkey (64 hex chars)".to_string())
     })?;
     Ok(format!("0x{}", hex::encode(arr)))
 }
@@ -233,6 +300,10 @@ pub fn validate_consume(
     let is_delegated = tx.signer != *owner || tx.delegation_proof.is_some();
 
     if is_delegated {
+        // Hard gate: delegated consume must use payload_version=2. Enforced here so --allow-unsigned cannot bypass.
+        if tx.effective_payload_version() != crate::tx::transaction::PAYLOAD_VERSION_V2 {
+            return Err(Error::DelegatedConsumeRequiresV2);
+        }
         let proof_bytes = tx.delegation_proof.as_ref().ok_or(Error::DelegationProofMissing)?;
         let valid_at = tx.valid_at.ok_or(Error::ValidAtMissing)?;
         let nonce_account = tx
@@ -252,19 +323,54 @@ pub fn validate_consume(
             }
         }
 
-        let proof: DelegationProofMinimal = bincode::deserialize(proof_bytes)
+        let signed_proof: SignedDelegationProof = bincode::deserialize(proof_bytes)
             .map_err(|_| Error::DelegationExpiredOrNotYetValid)?;
+        let proof = &signed_proof.claims;
+
+        // Verify owner (issuer) signed the claims — prevents delegate from forging proof
+        let issuer_pubkey = wallet::address_to_public_key(&proof.issuer).ok_or_else(|| {
+            Error::PrincipalBindingFailed(format!("Issuer not a valid chain address: {}", proof.issuer))
+        })?;
+        let message = delegation_claims_to_sign(proof);
+        let sig_bytes: [u8; 64] = signed_proof
+            .signature
+            .as_slice()
+            .try_into()
+            .map_err(|_| Error::DelegationExpiredOrNotYetValid)?;
+        let sig = Signature::from_bytes(&sig_bytes);
+        let verifying_key = VerifyingKey::from_bytes(&issuer_pubkey)
+            .map_err(|_| Error::DelegationExpiredOrNotYetValid)?;
+        verifying_key
+            .verify(&message, &sig)
+            .map_err(|_| Error::DelegationExpiredOrNotYetValid)?;
+
         if proof.iat > valid_at || valid_at >= proof.exp {
             return Err(Error::DelegationExpiredOrNotYetValid);
         }
 
         let issuer_addr = principal_to_chain_address(&proof.issuer)?;
         let audience_addr = principal_to_chain_address(&proof.audience)?;
-        if normalize_address(owner) != issuer_addr {
+        let owner_addr = principal_to_chain_address(owner)?;
+        let signer_addr = principal_to_chain_address(&tx.signer)?;
+        if owner_addr != issuer_addr {
             return Err(Error::DelegationIssuerOwnerMismatch);
         }
-        if normalize_address(&tx.signer) != audience_addr {
+        if signer_addr != audience_addr {
             return Err(Error::DelegationAudienceSignerMismatch);
+        }
+
+        // Caveat limits: consumed + this_tx <= limit (per capability_id)
+        let cap_id = capability_id(proof_bytes);
+        let (consumed_units, consumed_cost) = state.get_capability_consumption(&cap_id);
+        if let Some(limit) = proof.max_units {
+            if consumed_units.saturating_add(*units) > limit {
+                return Err(Error::CapabilityLimitExceeded);
+            }
+        }
+        if let Some(limit) = proof.max_cost {
+            if consumed_cost.saturating_add(cost) > limit {
+                return Err(Error::CapabilityLimitExceeded);
+            }
         }
 
         let nonce_acc = state.get_account(nonce_account).ok_or_else(|| {
@@ -294,6 +400,12 @@ pub fn validate_consume(
                 tx.signer, owner
             )));
         }
+        // Owner-signed consume: nonce_account must be None or Some(signer). Forbids incrementing another account's nonce.
+        if let Some(ref na) = tx.nonce_account {
+            if na != owner {
+                return Err(Error::NonceAccountMissingOrInvalid);
+            }
+        }
         let account = state.get_account(&tx.signer).ok_or_else(|| {
             Error::InvalidTransaction(format!("Account {} does not exist", tx.signer))
         })?;
@@ -314,10 +426,6 @@ pub fn validate_consume(
     }
 
     Ok(cost)
-}
-
-fn normalize_address(addr: &str) -> String {
-    principal_to_chain_address(addr).unwrap_or_else(|_| addr.to_lowercase())
 }
 
 /// Validate a CloseMeter transaction
@@ -647,11 +755,62 @@ mod tests {
     }
 
     #[test]
-    fn test_principal_to_chain_address_normalize() {
+    fn test_principal_to_chain_address_ok() {
         let hex32 = "0x".to_string() + &"a".repeat(64);
         let out = principal_to_chain_address(&hex32).unwrap();
         assert_eq!(out, "0x".to_string() + &"a".repeat(64));
-        let out = principal_to_chain_address("alice").unwrap();
-        assert_eq!(out, "alice");
+        let hex_upper = "0x".to_string() + &"Ab".repeat(32);
+        let out = principal_to_chain_address(&hex_upper).unwrap();
+        assert_eq!(out, "0x".to_string() + &"ab".repeat(32));
+    }
+
+    #[test]
+    fn test_principal_to_chain_address_reject_non_0x() {
+        let err = principal_to_chain_address("alice").unwrap_err();
+        match &err {
+            Error::PrincipalBindingFailed(msg) => {
+                assert!(msg.contains("0x") || msg.contains("did:key"));
+            }
+            _ => panic!("expected PrincipalBindingFailed, got {:?}", err),
+        }
+    }
+
+    #[test]
+    fn test_principal_to_chain_address_did_key_roundtrip() {
+        use crate::wallet::Wallet;
+        let wallet = Wallet::new_random();
+        let address = wallet.address().to_string();
+        let hex_body = address.strip_prefix("0x").unwrap();
+        let key_bytes: [u8; 32] = hex::decode(hex_body).unwrap().try_into().unwrap();
+        let mut payload = vec![0xed, 0x01];
+        payload.extend_from_slice(&key_bytes);
+        let multibase = "did:key:z".to_string() + &bs58::encode(payload).into_string();
+        let out = principal_to_chain_address(&multibase).unwrap();
+        assert_eq!(out, address, "did:key round-trip must match wallet address");
+    }
+
+    #[test]
+    fn test_principal_to_chain_address_did_key_spec_vector() {
+        // W3C did:key spec Ed25519 example
+        let did = "did:key:z6Mkf5rGMoatrSj1f4CyvuHBeXJELe9RPdzo2PKGNCKVtZxP";
+        let out = principal_to_chain_address(did).unwrap();
+        assert!(out.starts_with("0x") && out.len() == 66);
+        assert!(out.chars().skip(2).all(|c| c.is_ascii_hexdigit()));
+        // Same input must always produce same output (determinism)
+        assert_eq!(principal_to_chain_address(did).unwrap(), out);
+    }
+
+    #[test]
+    fn test_principal_to_chain_address_did_key_reject_wrong_multicodec() {
+        // Build a did:key with wrong multicodec (e.g. 0xec 0x01 for x25519) — decode will succeed but we reject non-Ed25519
+        let key_bytes = [0u8; 32];
+        let mut payload = vec![0xec, 0x01]; // x25519-pub
+        payload.extend_from_slice(&key_bytes);
+        let multibase = "did:key:z".to_string() + &bs58::encode(payload).into_string();
+        let err = principal_to_chain_address(&multibase).unwrap_err();
+        match &err {
+            Error::PrincipalBindingFailed(msg) => assert!(msg.contains("Ed25519") || msg.contains("0xed")),
+            _ => panic!("expected PrincipalBindingFailed, got {:?}", err),
+        }
     }
 }

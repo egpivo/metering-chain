@@ -76,17 +76,17 @@ fixed\_cost              & \text{if pricing = FixedCost}
 ### Preconditions
 - Meter `(T.owner, T.service_id)` exists
 - Meter is active
-- `T.signer == T.owner`
+- **Authorization:** `T.signer == T.owner` **OR** valid delegation for `(T.owner, T.service_id, Consume)` (owner-signed proof, expiry/caveats satisfied). Delegated Consume must use payload_version v2 and bind the proof in the signed payload.
 - `units > 0`
 - `cost > 0` (no overflow in computation)
 - `accounts[T.owner].balance ≥ cost`
-- `accounts[T.signer].nonce == T.nonce`
+- **Nonce:** the account whose nonce is consumed (the *nonce account*, either signer or owner when delegated) satisfies `accounts[nonce_account].nonce == T.nonce`; that account’s nonce is incremented on apply.
 
 ### State Update
 - `meters[(T.owner, T.service_id)].total_units += units`
 - `meters[(T.owner, T.service_id)].total_spent += cost`
 - `accounts[T.owner].balance -= cost`
-- `accounts[T.signer].nonce += 1`
+- `accounts[nonce_account].nonce += 1` where *nonce_account* is the owner when delegated, otherwise the signer
 
 ---
 
