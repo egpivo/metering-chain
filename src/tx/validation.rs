@@ -1,7 +1,6 @@
 use crate::error::{Error, Result};
 use crate::state::State;
 use crate::tx::{Pricing, SignedTx, Transaction};
-use crate::wallet;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
 
@@ -40,13 +39,22 @@ impl ValidationContext {
     }
 }
 
+/// Canonical ability name for Consume (delegation scope). Proof scoped to this may only be used for Consume.
+pub const ABILITY_CONSUME: &str = "consume";
+
 /// Minimal delegation proof claims. Must be signed by owner (issuer); see SignedDelegationProof.
+/// Scope: proof is valid only for (owner, service_id, ability) matching the transaction.
 #[derive(Debug, Clone, serde::Serialize, Deserialize)]
 pub struct DelegationProofMinimal {
     pub iat: u64,
     pub exp: u64,
     pub issuer: String,
     pub audience: String,
+    /// Resource scope: meter (owner, service_id). Must match Consume tx's service_id (issuer = owner).
+    pub service_id: String,
+    /// Ability scope: e.g. "consume". If present, must equal ABILITY_CONSUME for Consume tx.
+    #[serde(default)]
+    pub ability: Option<String>,
     /// Optional caveat: max units for this capability (consumed_units + this_tx <= limit).
     #[serde(default)]
     pub max_units: Option<u64>,
@@ -86,12 +94,12 @@ pub fn delegation_claims_to_sign(claims: &DelegationProofMinimal) -> Vec<u8> {
 /// Multicodec varint for Ed25519 public key (0xed = 237): encoded as two bytes 0xed, 0x01.
 const MULTICODEC_ED25519_HEADER: [u8; 2] = [0xed, 0x01];
 
-/// Convert principal to chain address. Rejects unconvertible principals per M2.
-/// Accepted: (1) 0x + 64 hex chars (32-byte Ed25519 pubkey); (2) did:key with Ed25519 (z6Mk...).
-pub fn principal_to_chain_address(principal: &str) -> Result<String> {
+/// Extract 32-byte Ed25519 public key from a principal. Used for proof issuer verification (supports did:key).
+/// Accepted: (1) 0x + 64 hex chars; (2) did:key with Ed25519 (z6Mk...).
+pub fn principal_to_public_key(principal: &str) -> Result<[u8; 32]> {
     let s = principal.trim();
 
-    // did:key:z<base58btc> — multibase value must start with z (base58-btc)
+    // did:key:z<base58btc>
     if let Some(mb_value) = s.strip_prefix("did:key:") {
         let mb = mb_value.trim();
         let multibase_body = mb
@@ -106,8 +114,8 @@ pub fn principal_to_chain_address(principal: &str) -> Result<String> {
             .map_err(|e| {
                 Error::PrincipalBindingFailed(format!("did:key base58 decode failed: {}", e))
             })?;
-        // Multicodec varint for Ed25519: 0xed 0x01 (2 bytes), then 32-byte key. Total 34 bytes.
-        if decoded.len() < 34
+        // Canonical length only: exactly 2 (multicodec) + 32 (key); reject trailing bytes
+        if decoded.len() != 34
             || decoded[0] != MULTICODEC_ED25519_HEADER[0]
             || decoded[1] != MULTICODEC_ED25519_HEADER[1]
         {
@@ -120,10 +128,10 @@ pub fn principal_to_chain_address(principal: &str) -> Result<String> {
             .map_err(|_| {
                 Error::PrincipalBindingFailed("did:key Ed25519 key must be 32 bytes".to_string())
             })?;
-        return Ok(format!("0x{}", hex::encode(arr)));
+        return Ok(arr);
     }
 
-    // 0x + 64 hex chars (32-byte Ed25519 pubkey)
+    // 0x + 64 hex chars
     let hex_part = match s.strip_prefix("0x") {
         Some(h) => h,
         None => {
@@ -139,6 +147,13 @@ pub fn principal_to_chain_address(principal: &str) -> Result<String> {
     let arr: [u8; 32] = bytes.try_into().map_err(|_| {
         Error::PrincipalBindingFailed("Expected 32-byte pubkey (64 hex chars)".to_string())
     })?;
+    Ok(arr)
+}
+
+/// Convert principal to chain address. Rejects unconvertible principals per M2.
+/// Accepted: (1) 0x + 64 hex chars (32-byte Ed25519 pubkey); (2) did:key with Ed25519 (z6Mk...).
+pub fn principal_to_chain_address(principal: &str) -> Result<String> {
+    let arr = principal_to_public_key(principal)?;
     Ok(format!("0x{}", hex::encode(arr)))
 }
 
@@ -327,9 +342,12 @@ pub fn validate_consume(
             .map_err(|_| Error::DelegationExpiredOrNotYetValid)?;
         let proof = &signed_proof.claims;
 
-        // Verify owner (issuer) signed the claims — prevents delegate from forging proof
-        let issuer_pubkey = wallet::address_to_public_key(&proof.issuer).ok_or_else(|| {
-            Error::PrincipalBindingFailed(format!("Issuer not a valid chain address: {}", proof.issuer))
+        // Verify owner (issuer) signed the claims — supports 0x and did:key (principal_to_public_key)
+        let issuer_pubkey = principal_to_public_key(&proof.issuer).map_err(|e| match e {
+            Error::PrincipalBindingFailed(msg) => {
+                Error::PrincipalBindingFailed(format!("Issuer not a valid principal (0x or did:key): {}", msg))
+            }
+            other => other,
         })?;
         let message = delegation_claims_to_sign(proof);
         let sig_bytes: [u8; 64] = signed_proof
@@ -359,8 +377,21 @@ pub fn validate_consume(
             return Err(Error::DelegationAudienceSignerMismatch);
         }
 
+        // Scope: proof must be for this (owner, service_id, ability)
+        if proof.service_id != *service_id {
+            return Err(Error::DelegationScopeMismatch);
+        }
+        if let Some(ref ab) = proof.ability {
+            if ab.as_str() != ABILITY_CONSUME {
+                return Err(Error::DelegationScopeMismatch);
+            }
+        }
+
         // Caveat limits: consumed + this_tx <= limit (per capability_id)
         let cap_id = capability_id(proof_bytes);
+        if state.is_capability_revoked(&cap_id) {
+            return Err(Error::DelegationRevoked);
+        }
         let (consumed_units, consumed_cost) = state.get_capability_consumption(&cap_id);
         if let Some(limit) = proof.max_units {
             if consumed_units.saturating_add(*units) > limit {
@@ -477,9 +508,41 @@ pub fn validate_close_meter(state: &State, tx: &SignedTx) -> Result<()> {
     Ok(())
 }
 
+/// Validate a RevokeDelegation transaction.
+///
+/// Checks: signer == owner, owner account exists, nonce matches.
+pub fn validate_revoke_delegation(state: &State, tx: &SignedTx) -> Result<()> {
+    let Transaction::RevokeDelegation { owner, capability_id: _ } = &tx.kind else {
+        return Err(Error::InvalidTransaction(
+            "Expected RevokeDelegation transaction".to_string(),
+        ));
+    };
+
+    if tx.signer != *owner {
+        return Err(Error::InvalidTransaction(format!(
+            "Signer {} does not match owner {}",
+            tx.signer, owner
+        )));
+    }
+
+    let account = state.get_account(&tx.signer).ok_or_else(|| {
+        Error::InvalidTransaction(format!("Account {} does not exist", tx.signer))
+    })?;
+
+    if account.nonce() != tx.nonce {
+        return Err(Error::InvalidTransaction(format!(
+            "Nonce mismatch: expected {}, got {}",
+            account.nonce(),
+            tx.nonce
+        )));
+    }
+
+    Ok(())
+}
+
 /// Main validation function that dispatches to specific validators
 ///
-/// Returns Ok(()) for Mint, OpenMeter, CloseMeter
+/// Returns Ok(()) for Mint, OpenMeter, CloseMeter, RevokeDelegation
 /// Returns Ok(cost) for Consume (computed cost). ctx is used for Consume (Live/Replay time rules).
 pub fn validate(
     state: &State,
@@ -502,6 +565,10 @@ pub fn validate(
         }
         Transaction::CloseMeter { .. } => {
             validate_close_meter(state, tx)?;
+            Ok(None)
+        }
+        Transaction::RevokeDelegation { .. } => {
+            validate_revoke_delegation(state, tx)?;
             Ok(None)
         }
     }
@@ -810,6 +877,38 @@ mod tests {
         let err = principal_to_chain_address(&multibase).unwrap_err();
         match &err {
             Error::PrincipalBindingFailed(msg) => assert!(msg.contains("Ed25519") || msg.contains("0xed")),
+            _ => panic!("expected PrincipalBindingFailed, got {:?}", err),
+        }
+    }
+
+    #[test]
+    fn test_principal_to_public_key_did_key() {
+        use crate::wallet::Wallet;
+        // principal_to_public_key(issuer) is used for proof verification; did:key issuer must yield same key as 0x.
+        let wallet = Wallet::new_random();
+        let address = wallet.address().to_string();
+        let hex_body = address.strip_prefix("0x").unwrap();
+        let key_bytes: [u8; 32] = hex::decode(hex_body).unwrap().try_into().unwrap();
+        let mut payload = vec![0xed, 0x01];
+        payload.extend_from_slice(&key_bytes);
+        let did_key = "did:key:z".to_string() + &bs58::encode(payload).into_string();
+        let from_did = principal_to_public_key(&did_key).unwrap();
+        assert_eq!(from_did, key_bytes, "principal_to_public_key(did:key) must match 0x pubkey for proof verification");
+    }
+
+    #[test]
+    fn test_principal_to_public_key_did_key_reject_non_canonical_length() {
+        // did:key with decoded length > 34 (canonical 2+32) must be rejected (no trailing bytes).
+        let key_bytes = [0u8; 32];
+        let mut payload = vec![0xed, 0x01];
+        payload.extend_from_slice(&key_bytes);
+        payload.push(0); // 35 bytes total
+        let multibase = "did:key:z".to_string() + &bs58::encode(payload).into_string();
+        let err = principal_to_public_key(&multibase).unwrap_err();
+        match &err {
+            Error::PrincipalBindingFailed(msg) => {
+                assert!(msg.contains("length") || msg.contains("0xed"), "expected length/header message: {}", msg);
+            }
             _ => panic!("expected PrincipalBindingFailed, got {:?}", err),
         }
     }

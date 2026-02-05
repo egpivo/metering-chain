@@ -42,6 +42,9 @@ pub fn apply(
         Transaction::CloseMeter { owner, service_id } => {
             apply_close_meter(&mut new_state, owner, service_id, &tx.signer)?;
         }
+        Transaction::RevokeDelegation { owner: _, capability_id } => {
+            apply_revoke_delegation(&mut new_state, capability_id, &tx.signer)?;
+        }
     }
 
     Ok(new_state)
@@ -130,6 +133,15 @@ fn apply_close_meter(state: &mut State, owner: &str, service_id: &str, signer: &
         .ok_or_else(|| Error::StateError(format!("Account {} not found", signer)))?;
     signer_account.increment_nonce();
 
+    Ok(())
+}
+
+fn apply_revoke_delegation(state: &mut State, capability_id: &str, signer: &str) -> Result<()> {
+    state.revoke_capability(capability_id.to_string());
+    let signer_account = state
+        .get_account_mut(signer)
+        .ok_or_else(|| Error::StateError(format!("Account {} not found", signer)))?;
+    signer_account.increment_nonce();
     Ok(())
 }
 

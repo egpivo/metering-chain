@@ -117,8 +117,16 @@ pub enum WalletSub {
         address: String,
 
         /// Delegate address (audience)
-        #[arg(short, long)]
+        #[arg(long)]
         audience: String,
+
+        /// Scope: service_id (must match Consume tx service_id)
+        #[arg(long)]
+        service_id: String,
+
+        /// Scope: ability (e.g. "consume"; optional; if set must match tx type)
+        #[arg(long)]
+        ability: Option<String>,
 
         /// Issued-at time (Unix seconds)
         #[arg(long)]
@@ -139,6 +147,32 @@ pub enum WalletSub {
         /// Output file path for proof bytes
         #[arg(short, long)]
         output: String,
+    },
+
+    /// Create owner-signed RevokeDelegation transaction (output JSON; apply separately).
+    RevokeDelegation {
+        /// Owner wallet address (signer; must exist in wallets)
+        #[arg(short, long)]
+        address: String,
+
+        /// Capability ID to revoke (e.g. from capability_id(proof_bytes), lowercase hex)
+        #[arg(short, long)]
+        capability_id: String,
+
+        /// Nonce to use; if omitted, read from state for owner
+        #[arg(long)]
+        nonce: Option<u64>,
+
+        /// Write signed tx JSON to file instead of stdout
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+
+    /// Print capability_id (sha256 hex) for a delegation proof file. Use with revoke-delegation --capability-id.
+    CapabilityId {
+        /// Path to file containing delegation proof bytes
+        #[arg(short, long)]
+        proof_file: String,
     },
 }
 
@@ -281,7 +315,7 @@ pub fn run(cli: Cli) -> Result<()> {
             )?;
 
             if dry_run {
-                println!("✓ Transaction is valid");
+                println!("Transaction is valid");
                 if let Some(cost) = cost_opt {
                     println!("  Cost: {}", cost);
                 }
@@ -296,7 +330,7 @@ pub fn run(cli: Cli) -> Result<()> {
             storage.append_tx(&signed_tx)?;
             storage.persist_state(&state, last_tx_id)?;
 
-            println!("✓ Transaction applied successfully");
+            println!("Transaction applied successfully");
             if let Some(cost) = cost_opt {
                 println!("  Cost: {}", cost);
             }
@@ -381,6 +415,8 @@ pub fn run(cli: Cli) -> Result<()> {
             WalletSub::CreateDelegationProof {
                 address,
                 audience,
+                service_id,
+                ability,
                 iat,
                 exp,
                 max_units,
@@ -397,6 +433,8 @@ pub fn run(cli: Cli) -> Result<()> {
                     exp,
                     issuer: address.clone(),
                     audience: audience.clone(),
+                    service_id: service_id.clone(),
+                    ability: ability.clone(),
                     max_units: max_units.clone(),
                     max_cost: max_cost.clone(),
                 };
@@ -405,6 +443,41 @@ pub fn run(cli: Cli) -> Result<()> {
                     Error::StateError(format!("Failed to write proof file: {}", e))
                 })?;
                 println!("Created signed delegation proof: {} bytes", proof_bytes.len());
+                Ok(())
+            }
+            WalletSub::RevokeDelegation {
+                address,
+                capability_id,
+                nonce,
+                output,
+            } => {
+                let (state, _) = load_or_create_state(&storage, &config)?;
+                let nonce_val = nonce.unwrap_or_else(|| {
+                    state.get_account(&address).map(|a| a.nonce()).unwrap_or(0)
+                });
+                let wallets =
+                    metering_chain::wallet::Wallets::new(config.get_wallets_path().clone());
+                let kind = metering_chain::tx::Transaction::RevokeDelegation {
+                    owner: address.clone(),
+                    capability_id: capability_id.clone(),
+                };
+                let signed = wallets.sign_transaction(&address, nonce_val, kind)?;
+                let json = serde_json::to_string_pretty(&signed).unwrap();
+                if let Some(path) = output {
+                    fs::write(&path, &json).map_err(|e| {
+                        Error::StateError(format!("Failed to write {}: {}", path, e))
+                    })?;
+                    println!("Wrote signed RevokeDelegation to {}", path);
+                } else {
+                    println!("{}", json);
+                }
+                Ok(())
+            }
+            WalletSub::CapabilityId { proof_file } => {
+                let bytes = fs::read(&proof_file)
+                    .map_err(|e| Error::StateError(format!("Failed to read {}: {}", proof_file, e)))?;
+                let cap_id = metering_chain::tx::capability_id(&bytes);
+                println!("{}", cap_id);
                 Ok(())
             }
         },

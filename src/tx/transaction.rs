@@ -33,6 +33,11 @@ pub enum Transaction {
     },
     /// Close a meter and return locked deposit
     CloseMeter { owner: String, service_id: String },
+    /// Revoke a delegation capability (owner-signed). Apply adds capability_id to revoked set.
+    RevokeDelegation {
+        owner: String,
+        capability_id: String,
+    },
 }
 
 /// Payload V1: canonical signing (signer + nonce + kind). Used for legacy and owner-signed tx.

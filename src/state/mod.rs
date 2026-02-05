@@ -7,7 +7,7 @@ pub use apply::apply;
 pub use meter::Meter;
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Meter key: composite key for identifying meters by (owner, service_id)
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,6 +44,10 @@ pub struct State {
     /// Consumed units/cost per capability_id (lowercase hex) for caveat limits.
     #[serde(default)]
     pub capability_consumption: HashMap<String, CapabilityConsumption>,
+
+    /// Revoked capability IDs (owner-signed RevokeDelegation). Delegated Consume with this capability_id is rejected.
+    #[serde(default)]
+    pub revoked_capability_ids: HashSet<String>,
 }
 
 impl State {
@@ -53,7 +57,18 @@ impl State {
             accounts: HashMap::new(),
             meters: HashMap::new(),
             capability_consumption: HashMap::new(),
+            revoked_capability_ids: HashSet::new(),
         }
+    }
+
+    /// Returns true if the capability has been revoked (RevokeDelegation applied).
+    pub fn is_capability_revoked(&self, capability_id: &str) -> bool {
+        self.revoked_capability_ids.contains(capability_id)
+    }
+
+    /// Mark a capability as revoked (used by apply RevokeDelegation).
+    pub fn revoke_capability(&mut self, capability_id: String) {
+        self.revoked_capability_ids.insert(capability_id);
     }
 
     /// Get cumulative consumption for a capability_id (0,0 if unknown).

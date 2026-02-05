@@ -50,7 +50,7 @@ fn load_or_replay_state(storage: &FileStorage) -> (State, u64) {
     }
 }
 
-/// Test the complete happy path: Mint → OpenMeter → Consume → CloseMeter
+/// Test the complete happy path: Mint, OpenMeter, Consume, CloseMeter
 #[test]
 fn test_happy_path_end_to_end() {
     let (mut storage, _temp_dir) = create_test_storage();
@@ -804,7 +804,7 @@ fn test_multiple_meters() {
     assert_eq!(state.get_account("alice").unwrap().balance(), 1620); // 2000 - 100 - 200 - 50 - 30
 }
 
-/// Phase 2: signed tx apply success (wallet sign → verify → apply)
+/// Phase 2: signed tx apply success (wallet sign, verify, apply)
 #[test]
 fn test_phase2_signed_apply_success() {
     let wallet = Wallet::new_random();
@@ -954,6 +954,8 @@ fn test_phase3_delegated_consume_v2_accepted() {
         exp: 2000,
         issuer: owner_addr.clone(),
         audience: delegate_addr.clone(),
+        service_id: "storage".to_string(),
+        ability: None,
         max_units: None,
         max_cost: None,
     };
@@ -985,6 +987,79 @@ fn test_phase3_delegated_consume_v2_accepted() {
     assert_eq!(state.get_meter(&owner_addr, "storage").unwrap().total_units(), 10);
 }
 
+/// Delegated consume with proof.issuer as did:key (not 0x): verification uses principal_to_public_key, so did:key works.
+#[test]
+fn test_phase3_delegated_consume_issuer_did_key() {
+    use metering_chain::tx::transaction::PAYLOAD_VERSION_V2;
+    use metering_chain::tx::{build_signed_proof, delegation_claims_to_sign, DelegationProofMinimal};
+
+    let owner_wallet = Wallet::new_random();
+    let owner_addr = owner_wallet.address().to_string();
+    let delegate_wallet = Wallet::new_random();
+    let delegate_addr = delegate_wallet.address().to_string();
+
+    // Build did:key for owner (same key as owner_addr)
+    let hex_body = owner_addr.strip_prefix("0x").unwrap();
+    let key_bytes: [u8; 32] = hex::decode(hex_body).unwrap().try_into().unwrap();
+    let mut payload = vec![0xed, 0x01];
+    payload.extend_from_slice(&key_bytes);
+    let owner_did_key = "did:key:z".to_string() + &bs58::encode(payload).into_string();
+
+    let mut minters = HashSet::new();
+    minters.insert("authority".to_string());
+    let mut state = State::new();
+    let mint_tx = SignedTx::new(
+        "authority".to_string(),
+        0,
+        Transaction::Mint { to: owner_addr.clone(), amount: 1000 },
+    );
+    state = apply(&state, &mint_tx, &replay_ctx(), Some(&minters)).unwrap();
+    let open_tx = owner_wallet.sign_transaction(0, Transaction::OpenMeter {
+        owner: owner_addr.clone(),
+        service_id: "storage".to_string(),
+        deposit: 100,
+    }).unwrap();
+    state = apply(&state, &open_tx, &replay_ctx(), Some(&minters)).unwrap();
+
+    let valid_at = 1000u64;
+    let claims = DelegationProofMinimal {
+        iat: 0,
+        exp: 2000,
+        issuer: owner_did_key.clone(),
+        audience: delegate_addr.clone(),
+        service_id: "storage".to_string(),
+        ability: None,
+        max_units: None,
+        max_cost: None,
+    };
+    let message = delegation_claims_to_sign(&claims);
+    let sig = owner_wallet.sign_bytes(&message);
+    let proof = build_signed_proof(&claims, sig);
+    let consume_kind = Transaction::Consume {
+        owner: owner_addr.clone(),
+        service_id: "storage".to_string(),
+        units: 10,
+        pricing: Pricing::UnitPrice(5),
+    };
+    let delegated_tx = delegate_wallet
+        .sign_transaction_v2(1, owner_addr.clone(), valid_at, proof, consume_kind)
+        .unwrap();
+    assert_eq!(delegated_tx.effective_payload_version(), PAYLOAD_VERSION_V2);
+    verify_signature(&delegated_tx).unwrap();
+
+    let live_ctx = ValidationContext::live(valid_at, 300);
+    let cost_opt = metering_chain::tx::validation::validate(
+        &state,
+        &delegated_tx,
+        &live_ctx,
+        Some(&minters),
+    ).unwrap();
+    assert_eq!(cost_opt, Some(50));
+    state = apply(&state, &delegated_tx, &live_ctx, Some(&minters)).unwrap();
+    assert_eq!(state.get_account(&owner_addr).unwrap().nonce(), 2);
+    assert_eq!(state.get_meter(&owner_addr, "storage").unwrap().total_units(), 10);
+}
+
 /// Live context: missing now or max_age rejects delegated consume validation.
 #[test]
 fn test_phase3_live_context_requires_now_max_age() {
@@ -1005,6 +1080,8 @@ fn test_phase3_live_context_requires_now_max_age() {
         exp: 9999,
         issuer: owner_addr.clone(),
         audience: delegate_addr.clone(),
+        service_id: "s".to_string(),
+        ability: None,
         max_units: None,
         max_cost: None,
     };
@@ -1057,6 +1134,8 @@ fn test_phase3_replay_no_wall_clock() {
         exp: 200,
         issuer: owner_addr.clone(),
         audience: delegate_addr.clone(),
+        service_id: "s".to_string(),
+        ability: None,
         max_units: None,
         max_cost: None,
     };
@@ -1100,6 +1179,8 @@ fn test_phase3_forged_proof_rejected() {
         exp: 9999,
         issuer: owner_addr.clone(),
         audience: delegate_addr.clone(),
+        service_id: "s".to_string(),
+        ability: None,
         max_units: None,
         max_cost: None,
     };
@@ -1125,6 +1206,168 @@ fn test_phase3_forged_proof_rejected() {
     let ctx = ValidationContext::live(100, 300);
     let res = metering_chain::tx::validation::validate(&state, &tx, &ctx, None);
     assert!(res.is_err(), "Forged proof (signed by delegate) must be rejected: {:?}", res);
+}
+
+/// Delegation scope: proof.service_id must match Consume tx service_id; wrong service_id -> DelegationScopeMismatch.
+#[test]
+fn test_phase3_delegation_scope_service_id_mismatch() {
+    use metering_chain::tx::DelegationProofMinimal;
+
+    let owner_wallet = Wallet::new_random();
+    let owner_addr = owner_wallet.address().to_string();
+    let delegate_wallet = Wallet::new_random();
+    let delegate_addr = delegate_wallet.address().to_string();
+
+    let mut state = State::new();
+    state.accounts.insert(owner_addr.clone(), Account::with_balance(1000));
+    state.insert_meter(Meter::new(owner_addr.clone(), "storage".into(), 100));
+
+    // Proof scoped to "other", tx consumes "storage"
+    let claims = DelegationProofMinimal {
+        iat: 0,
+        exp: 9999,
+        issuer: owner_addr.clone(),
+        audience: delegate_addr.clone(),
+        service_id: "other".to_string(),
+        ability: None,
+        max_units: None,
+        max_cost: None,
+    };
+    let proof = owner_wallet.sign_delegation_proof(&claims);
+    let tx = SignedTx {
+        payload_version: Some(2),
+        signer: delegate_addr.clone(),
+        nonce: 0,
+        nonce_account: Some(owner_addr.clone()),
+        valid_at: Some(100),
+        delegation_proof: Some(proof),
+        kind: Transaction::Consume {
+            owner: owner_addr.clone(),
+            service_id: "storage".to_string(),
+            units: 1,
+            pricing: Pricing::UnitPrice(10),
+        },
+        signature: None,
+    };
+    let ctx = ValidationContext::live(100, 300);
+    let res = metering_chain::tx::validation::validate(&state, &tx, &ctx, None);
+    assert!(res.is_err(), "service_id mismatch must be rejected: {:?}", res);
+    match res.unwrap_err() {
+        Error::DelegationScopeMismatch => {}
+        e => panic!("expected DelegationScopeMismatch, got {:?}", e),
+    }
+}
+
+/// Delegation scope: if proof.ability is set, it must equal "consume" for Consume tx; wrong ability -> DelegationScopeMismatch.
+#[test]
+fn test_phase3_delegation_scope_ability_mismatch() {
+    use metering_chain::tx::DelegationProofMinimal;
+
+    let owner_wallet = Wallet::new_random();
+    let owner_addr = owner_wallet.address().to_string();
+    let delegate_wallet = Wallet::new_random();
+    let delegate_addr = delegate_wallet.address().to_string();
+
+    let mut state = State::new();
+    state.accounts.insert(owner_addr.clone(), Account::with_balance(1000));
+    state.insert_meter(Meter::new(owner_addr.clone(), "s".into(), 100));
+
+    let claims = DelegationProofMinimal {
+        iat: 0,
+        exp: 9999,
+        issuer: owner_addr.clone(),
+        audience: delegate_addr.clone(),
+        service_id: "s".to_string(),
+        ability: Some("other".to_string()),
+        max_units: None,
+        max_cost: None,
+    };
+    let proof = owner_wallet.sign_delegation_proof(&claims);
+    let tx = SignedTx {
+        payload_version: Some(2),
+        signer: delegate_addr.clone(),
+        nonce: 0,
+        nonce_account: Some(owner_addr.clone()),
+        valid_at: Some(100),
+        delegation_proof: Some(proof),
+        kind: Transaction::Consume {
+            owner: owner_addr.clone(),
+            service_id: "s".to_string(),
+            units: 1,
+            pricing: Pricing::UnitPrice(10),
+        },
+        signature: None,
+    };
+    let ctx = ValidationContext::live(100, 300);
+    let res = metering_chain::tx::validation::validate(&state, &tx, &ctx, None);
+    assert!(res.is_err(), "ability mismatch must be rejected: {:?}", res);
+    match res.unwrap_err() {
+        Error::DelegationScopeMismatch => {}
+        e => panic!("expected DelegationScopeMismatch, got {:?}", e),
+    }
+}
+
+/// Delegation scope: proof.ability = Some("consume") is accepted (explicit ability passes).
+#[test]
+fn test_phase3_delegation_ability_consume_accepted() {
+    use metering_chain::tx::transaction::PAYLOAD_VERSION_V2;
+    use metering_chain::tx::DelegationProofMinimal;
+
+    let owner_wallet = Wallet::new_random();
+    let owner_addr = owner_wallet.address().to_string();
+    let delegate_wallet = Wallet::new_random();
+    let delegate_addr = delegate_wallet.address().to_string();
+
+    let mut minters = HashSet::new();
+    minters.insert("authority".to_string());
+    let mut state = State::new();
+    let mint_tx = SignedTx::new(
+        "authority".to_string(),
+        0,
+        Transaction::Mint { to: owner_addr.clone(), amount: 1000 },
+    );
+    state = apply(&state, &mint_tx, &replay_ctx(), Some(&minters)).unwrap();
+    let open_tx = owner_wallet.sign_transaction(0, Transaction::OpenMeter {
+        owner: owner_addr.clone(),
+        service_id: "storage".to_string(),
+        deposit: 100,
+    }).unwrap();
+    state = apply(&state, &open_tx, &replay_ctx(), Some(&minters)).unwrap();
+
+    let valid_at = 1000u64;
+    let claims = DelegationProofMinimal {
+        iat: 0,
+        exp: 2000,
+        issuer: owner_addr.clone(),
+        audience: delegate_addr.clone(),
+        service_id: "storage".to_string(),
+        ability: Some("consume".to_string()),
+        max_units: None,
+        max_cost: None,
+    };
+    let proof = owner_wallet.sign_delegation_proof(&claims);
+    let consume_kind = Transaction::Consume {
+        owner: owner_addr.clone(),
+        service_id: "storage".to_string(),
+        units: 5,
+        pricing: Pricing::UnitPrice(4),
+    };
+    let delegated_tx = delegate_wallet
+        .sign_transaction_v2(1, owner_addr.clone(), valid_at, proof, consume_kind)
+        .unwrap();
+    assert_eq!(delegated_tx.effective_payload_version(), PAYLOAD_VERSION_V2);
+    verify_signature(&delegated_tx).unwrap();
+
+    let live_ctx = ValidationContext::live(valid_at, 300);
+    let cost_opt = metering_chain::tx::validation::validate(
+        &state,
+        &delegated_tx,
+        &live_ctx,
+        Some(&minters),
+    ).unwrap();
+    assert_eq!(cost_opt, Some(20));
+    state = apply(&state, &delegated_tx, &live_ctx, Some(&minters)).unwrap();
+    assert_eq!(state.get_meter(&owner_addr, "storage").unwrap().total_units(), 5);
 }
 
 /// Caveat max_cost: first consume under limit ok, second exceed returns CapabilityLimitExceeded.
@@ -1156,6 +1399,8 @@ fn test_phase3_caveat_max_cost_enforced() {
         exp: 2000,
         issuer: owner_addr.clone(),
         audience: delegate_addr.clone(),
+        service_id: "storage".to_string(),
+        ability: None,
         max_units: None,
         max_cost: Some(50),
     };
@@ -1270,6 +1515,8 @@ fn test_phase3_multi_delegate_nonce_competition() {
         exp: 2000,
         issuer: owner_addr.clone(),
         audience: delegate1_addr.clone(),
+        service_id: "storage".to_string(),
+        ability: None,
         max_units: None,
         max_cost: None,
     };
@@ -1278,6 +1525,8 @@ fn test_phase3_multi_delegate_nonce_competition() {
         exp: 2000,
         issuer: owner_addr.clone(),
         audience: delegate2_addr.clone(),
+        service_id: "storage".to_string(),
+        ability: None,
         max_units: None,
         max_cost: None,
     };
@@ -1292,14 +1541,14 @@ fn test_phase3_multi_delegate_nonce_competition() {
         pricing: Pricing::UnitPrice(5),
     };
 
-    // Delegate1 consumes owner nonce 1 → success; owner nonce becomes 2
+    // Delegate1 consumes owner nonce 1; success; owner nonce becomes 2
     let tx1 = delegate1_wallet
         .sign_transaction_v2(1, owner_addr.clone(), valid_at, proof_d1.clone(), consume_kind(10))
         .unwrap();
     state = apply(&state, &tx1, &live_ctx, Some(&minters)).unwrap();
     assert_eq!(state.get_account(&owner_addr).unwrap().nonce(), 2);
 
-    // Delegate2 tries owner nonce 1 (already used) → rejected
+    // Delegate2 tries owner nonce 1 (already used); rejected
     let tx2_same_nonce = delegate2_wallet
         .sign_transaction_v2(1, owner_addr.clone(), valid_at, proof_d2.clone(), consume_kind(5))
         .unwrap();
@@ -1311,7 +1560,7 @@ fn test_phase3_multi_delegate_nonce_competition() {
     }
     assert_eq!(state.get_account(&owner_addr).unwrap().nonce(), 2);
 
-    // Delegate2 uses owner nonce 2 → success
+    // Delegate2 uses owner nonce 2; success
     let tx2_correct = delegate2_wallet
         .sign_transaction_v2(2, owner_addr.clone(), valid_at, proof_d2, consume_kind(5))
         .unwrap();
@@ -1357,13 +1606,15 @@ fn test_phase3_retry_same_nonce_after_failure() {
         exp: 2000,
         issuer: owner_addr.clone(),
         audience: delegate_addr.clone(),
+        service_id: "storage".to_string(),
+        ability: None,
         max_units: None,
         max_cost: None,
     };
     let proof = owner_wallet.sign_delegation_proof(&claims);
     let live_ctx = ValidationContext::live(valid_at, 300);
 
-    // Consume would cost 100; owner balance 50 → insufficient
+    // Consume would cost 100; owner balance 50; insufficient
     let consume_tx = delegate_wallet
         .sign_transaction_v2(
             1,
@@ -1387,7 +1638,7 @@ fn test_phase3_retry_same_nonce_after_failure() {
     assert_eq!(state.get_account(&owner_addr).unwrap().nonce(), 1, "nonce unchanged after failed apply");
     assert_eq!(state.get_account(&owner_addr).unwrap().balance(), 50);
 
-    // Mint more to owner, retry with same nonce 1 → success
+    // Mint more to owner, retry with same nonce 1; success
     let extra_mint = SignedTx::new(
         "authority".to_string(),
         0,
@@ -1420,6 +1671,8 @@ fn test_phase3_replay_determinism() {
         exp: 2000,
         issuer: owner_addr.clone(),
         audience: delegate_addr.clone(),
+        service_id: "storage".to_string(),
+        ability: None,
         max_units: None,
         max_cost: None,
     };
@@ -1491,4 +1744,105 @@ fn test_phase3_replay_determinism() {
     assert_eq!(state_a, state_b, "same tx log replayed twice must yield identical state");
     assert_eq!(state_a.get_account(&owner_addr).unwrap().nonce(), 2);
     assert_eq!(state_a.get_meter(&owner_addr, "storage").unwrap().total_units(), 10);
+}
+
+/// Revocation: owner revokes capability; delegated Consume with that capability is rejected (DelegationRevoked).
+#[test]
+fn test_phase3_revocation_rejected_consume() {
+    use metering_chain::tx::validation::capability_id;
+    use metering_chain::tx::DelegationProofMinimal;
+
+    let owner_wallet = Wallet::new_random();
+    let owner_addr = owner_wallet.address().to_string();
+    let delegate_wallet = Wallet::new_random();
+    let delegate_addr = delegate_wallet.address().to_string();
+
+    let minters = get_authorized_minters();
+    let mut state = State::new();
+
+    let mint_tx = SignedTx::new(
+        "authority".to_string(),
+        0,
+        Transaction::Mint {
+            to: owner_addr.clone(),
+            amount: 2000,
+        },
+    );
+    state = apply(&state, &mint_tx, &replay_ctx(), Some(&minters)).unwrap();
+    let open_tx = owner_wallet.sign_transaction(0, Transaction::OpenMeter {
+        owner: owner_addr.clone(),
+        service_id: "storage".to_string(),
+        deposit: 100,
+    }).unwrap();
+    state = apply(&state, &open_tx, &replay_ctx(), Some(&minters)).unwrap();
+    assert_eq!(state.get_account(&owner_addr).unwrap().nonce(), 1);
+
+    let valid_at = 1000u64;
+    let claims = DelegationProofMinimal {
+        iat: 0,
+        exp: 2000,
+        issuer: owner_addr.clone(),
+        audience: delegate_addr.clone(),
+        service_id: "storage".to_string(),
+        ability: None,
+        max_units: None,
+        max_cost: None,
+    };
+    let proof = owner_wallet.sign_delegation_proof(&claims);
+    let cap_id = capability_id(&proof);
+    let live_ctx = ValidationContext::live(valid_at, 300);
+
+    // Delegate consumes once -> success
+    let consume1 = delegate_wallet
+        .sign_transaction_v2(
+            1,
+            owner_addr.clone(),
+            valid_at,
+            proof.clone(),
+            Transaction::Consume {
+                owner: owner_addr.clone(),
+                service_id: "storage".to_string(),
+                units: 10,
+                pricing: Pricing::UnitPrice(5),
+            },
+        )
+        .unwrap();
+    state = apply(&state, &consume1, &live_ctx, Some(&minters)).unwrap();
+    assert_eq!(state.get_account(&owner_addr).unwrap().nonce(), 2);
+
+    // Owner revokes the capability
+    let revoke_tx = owner_wallet
+        .sign_transaction(
+            2,
+            Transaction::RevokeDelegation {
+                owner: owner_addr.clone(),
+                capability_id: cap_id.clone(),
+            },
+        )
+        .unwrap();
+    state = apply(&state, &revoke_tx, &replay_ctx(), Some(&minters)).unwrap();
+    assert!(state.is_capability_revoked(&cap_id));
+    assert_eq!(state.get_account(&owner_addr).unwrap().nonce(), 3);
+
+    // Delegate tries to consume again with same proof -> DelegationRevoked
+    let consume2 = delegate_wallet
+        .sign_transaction_v2(
+            3,
+            owner_addr.clone(),
+            valid_at,
+            proof,
+            Transaction::Consume {
+                owner: owner_addr.clone(),
+                service_id: "storage".to_string(),
+                units: 5,
+                pricing: Pricing::UnitPrice(5),
+            },
+        )
+        .unwrap();
+    let res = apply(&state, &consume2, &live_ctx, Some(&minters));
+    assert!(res.is_err());
+    match res.unwrap_err() {
+        Error::DelegationRevoked => {}
+        e => panic!("expected DelegationRevoked, got {:?}", e),
+    }
 }

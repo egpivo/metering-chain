@@ -14,7 +14,7 @@ help:
 	@echo "  make fmt            - Format code"
 	@echo "  make clippy         - Run clippy linter"
 	@echo "  make doc            - Generate documentation"
-	@echo "  make demo           - Run demo flow (Mint → OpenMeter → Consume → CloseMeter)"
+	@echo "  make demo           - Run demo flow (Mint, OpenMeter, Consume, CloseMeter)"
 	@echo ""
 	@echo "CLI commands:"
 	@echo "  make run-init       - Initialize data directory"

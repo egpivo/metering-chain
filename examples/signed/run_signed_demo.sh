@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Phase 2 signed demo: init, 2 wallets, Mint → OpenMeter → Consume → CloseMeter (no --allow-unsigned).
+# Phase 2 signed demo: init, 2 wallets, Mint, OpenMeter, Consume, CloseMeter (no --allow-unsigned).
 # Run from repo root: ./examples/signed/run_signed_demo.sh
 set -euo pipefail
 
@@ -18,7 +18,7 @@ export METERING_CHAIN_MINTERS="$AUTHORITY"
 echo "Authority: $AUTHORITY"
 echo "User: $USER"
 
-# Mint (authority → user)
+# Mint (authority to user)
 echo "{\"Mint\":{\"to\":\"$USER\",\"amount\":1000}}" > "$DEMO_TMP/k1.json"
 $BIN wallet sign --address "$AUTHORITY" --file "$DEMO_TMP/k1.json" 2>/dev/null | $BIN apply
 

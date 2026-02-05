@@ -1,6 +1,6 @@
 # Phase 2 signed examples
 
-Strict flow: **signed tx only** (no `--allow-unsigned`). Uses `wallet create` → `wallet sign` → `apply`.
+Strict flow: **signed tx only** (no `--allow-unsigned`). Uses `wallet create`, `wallet sign`, then `apply`.
 
 ## Quick run
 
@@ -10,9 +10,9 @@ From repo root:
 ./examples/signed/run_signed_demo.sh
 ```
 
-The script runs `init`, creates two wallets (authority + user), sets `METERING_CHAIN_MINTERS`, then Mint → OpenMeter → Consume → CloseMeter with signed tx and pipes each into `apply`.
+The script runs `init`, creates two wallets (authority + user), sets `METERING_CHAIN_MINTERS`, then Mint, OpenMeter, Consume, CloseMeter with signed tx and pipes each into `apply`.
 
-## Kind → signed JSON
+## Kind to signed JSON
 
 `wallet sign` needs a **kind-only** JSON file (no signer/nonce; nonce comes from state). Example:
 

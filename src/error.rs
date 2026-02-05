@@ -53,6 +53,12 @@ pub enum Error {
 
     #[error("Capability limit exceeded")]
     CapabilityLimitExceeded,
+
+    #[error("Delegation revoked")]
+    DelegationRevoked,
+
+    #[error("Delegation scope mismatch: proof service_id or ability does not match transaction")]
+    DelegationScopeMismatch,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

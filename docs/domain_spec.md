@@ -41,7 +41,7 @@ Represents a usage ledger for a specific service owned by an account.
 - **OpenMeter**: Creates a new meter or reopens a closed meter
   - If meter does not exist: create with `total_units = 0`, `total_spent = 0`, `locked_deposit = deposit`
   - If meter exists but is inactive: reactivate, preserve `total_units` and `total_spent`, set new `locked_deposit = deposit`
-- **CloseMeter**: Active → Inactive, returns `locked_deposit` to balance
+- **CloseMeter**: Active to Inactive, returns `locked_deposit` to balance
 
 **Invariants**
 - Only the owner (or a valid delegate for Consume) may operate the meter; CloseMeter is owner-only in v1.

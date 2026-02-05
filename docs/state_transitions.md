@@ -10,12 +10,12 @@ All transitions are deterministic and side-effect free.
 - `S`   : current state (accounts, meters)
 - `T`   : transaction
 - `S'`  : resulting state
-- `✓`   : validation predicate
+- `V`   : validation predicate
 
 A transaction is applied as:
 
 \[
-(S, T) \rightarrow S' \quad \text{iff} \quad ✓(S, T)
+(S, T) \rightarrow S' \quad \text{iff} \quad V(S, T)
 \]
 
 If validation fails, the transition is rejected and state remains unchanged.
