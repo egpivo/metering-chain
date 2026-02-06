@@ -112,9 +112,7 @@ pub fn address_to_public_key(address: &str) -> Option<[u8; 32]> {
 
 /// Hard gate: delegated Consume must use payload_version=2. Call before signature verification.
 pub fn enforce_delegated_consume_v2(tx: &SignedTx) -> Result<()> {
-    if tx.is_delegated_consume()
-        && tx.effective_payload_version() != PAYLOAD_VERSION_V2
-    {
+    if tx.is_delegated_consume() && tx.effective_payload_version() != PAYLOAD_VERSION_V2 {
         return Err(Error::DelegatedConsumeRequiresV2);
     }
     Ok(())
