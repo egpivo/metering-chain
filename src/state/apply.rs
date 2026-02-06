@@ -33,7 +33,14 @@ pub fn apply(
         } => {
             let cost = cost_opt.expect("validate_consume should return cost");
             let nonce_account = tx.nonce_account.as_deref().unwrap_or(&tx.signer);
-            apply_consume(&mut new_state, owner, service_id, *units, cost, nonce_account)?;
+            apply_consume(
+                &mut new_state,
+                owner,
+                service_id,
+                *units,
+                cost,
+                nonce_account,
+            )?;
             if let Some(ref proof_bytes) = tx.delegation_proof {
                 let cap_id = capability_id(proof_bytes);
                 new_state.record_capability_consumption(cap_id, *units, cost);
@@ -42,7 +49,10 @@ pub fn apply(
         Transaction::CloseMeter { owner, service_id } => {
             apply_close_meter(&mut new_state, owner, service_id, &tx.signer)?;
         }
-        Transaction::RevokeDelegation { owner: _, capability_id } => {
+        Transaction::RevokeDelegation {
+            owner: _,
+            capability_id,
+        } => {
             apply_revoke_delegation(&mut new_state, capability_id, &tx.signer)?;
         }
     }

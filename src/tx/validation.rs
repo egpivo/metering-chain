@@ -102,32 +102,27 @@ pub fn principal_to_public_key(principal: &str) -> Result<[u8; 32]> {
     // did:key:z<base58btc>
     if let Some(mb_value) = s.strip_prefix("did:key:") {
         let mb = mb_value.trim();
-        let multibase_body = mb
-            .strip_prefix('z')
-            .ok_or_else(|| {
-                Error::PrincipalBindingFailed(
-                    "did:key multibase value must start with 'z' (base58-btc)".to_string(),
-                )
-            })?;
-        let decoded = bs58::decode(multibase_body)
-            .into_vec()
-            .map_err(|e| {
-                Error::PrincipalBindingFailed(format!("did:key base58 decode failed: {}", e))
-            })?;
+        let multibase_body = mb.strip_prefix('z').ok_or_else(|| {
+            Error::PrincipalBindingFailed(
+                "did:key multibase value must start with 'z' (base58-btc)".to_string(),
+            )
+        })?;
+        let decoded = bs58::decode(multibase_body).into_vec().map_err(|e| {
+            Error::PrincipalBindingFailed(format!("did:key base58 decode failed: {}", e))
+        })?;
         // Canonical length only: exactly 2 (multicodec) + 32 (key); reject trailing bytes
         if decoded.len() != 34
             || decoded[0] != MULTICODEC_ED25519_HEADER[0]
             || decoded[1] != MULTICODEC_ED25519_HEADER[1]
         {
             return Err(Error::PrincipalBindingFailed(
-                "did:key only supports Ed25519 (multicodec 0xed); wrong header or length".to_string(),
+                "did:key only supports Ed25519 (multicodec 0xed); wrong header or length"
+                    .to_string(),
             ));
         }
-        let arr: [u8; 32] = decoded[2..34]
-            .try_into()
-            .map_err(|_| {
-                Error::PrincipalBindingFailed("did:key Ed25519 key must be 32 bytes".to_string())
-            })?;
+        let arr: [u8; 32] = decoded[2..34].try_into().map_err(|_| {
+            Error::PrincipalBindingFailed("did:key Ed25519 key must be 32 bytes".to_string())
+        })?;
         return Ok(arr);
     }
 
@@ -141,9 +136,8 @@ pub fn principal_to_public_key(principal: &str) -> Result<[u8; 32]> {
         }
     };
     let hex_lower = hex_part.to_lowercase();
-    let bytes = hex::decode(&hex_lower).map_err(|e| {
-        Error::PrincipalBindingFailed(format!("Invalid hex: {}", e))
-    })?;
+    let bytes = hex::decode(&hex_lower)
+        .map_err(|e| Error::PrincipalBindingFailed(format!("Invalid hex: {}", e)))?;
     let arr: [u8; 32] = bytes.try_into().map_err(|_| {
         Error::PrincipalBindingFailed("Expected 32-byte pubkey (64 hex chars)".to_string())
     })?;
@@ -260,11 +254,7 @@ pub fn validate_open_meter(state: &State, tx: &SignedTx) -> Result<()> {
 ///
 /// Owner-signed: signer == owner, nonce from signer. Delegated: signer != owner, nonce from nonce_account (owner);
 /// delegation proof and valid_at required; time rules per ValidationContext (Live: now/max_age, Replay: no wall clock).
-pub fn validate_consume(
-    state: &State,
-    tx: &SignedTx,
-    ctx: &ValidationContext,
-) -> Result<u64> {
+pub fn validate_consume(state: &State, tx: &SignedTx, ctx: &ValidationContext) -> Result<u64> {
     let Transaction::Consume {
         owner,
         service_id,
@@ -319,7 +309,10 @@ pub fn validate_consume(
         if tx.effective_payload_version() != crate::tx::transaction::PAYLOAD_VERSION_V2 {
             return Err(Error::DelegatedConsumeRequiresV2);
         }
-        let proof_bytes = tx.delegation_proof.as_ref().ok_or(Error::DelegationProofMissing)?;
+        let proof_bytes = tx
+            .delegation_proof
+            .as_ref()
+            .ok_or(Error::DelegationProofMissing)?;
         let valid_at = tx.valid_at.ok_or(Error::ValidAtMissing)?;
         let nonce_account = tx
             .nonce_account
@@ -328,8 +321,12 @@ pub fn validate_consume(
             .ok_or(Error::NonceAccountMissingOrInvalid)?;
 
         if ctx.mode == ValidationMode::Live {
-            let now = ctx.now.ok_or(Error::InvalidValidationContextLiveNowMissing)?;
-            let max_age = ctx.max_age.ok_or(Error::InvalidValidationContextLiveMaxAgeMissing)?;
+            let now = ctx
+                .now
+                .ok_or(Error::InvalidValidationContextLiveNowMissing)?;
+            let max_age = ctx
+                .max_age
+                .ok_or(Error::InvalidValidationContextLiveMaxAgeMissing)?;
             if valid_at > now {
                 return Err(Error::ReferenceTimeFuture);
             }
@@ -338,15 +335,16 @@ pub fn validate_consume(
             }
         }
 
-        let signed_proof: SignedDelegationProof = bincode::deserialize(proof_bytes)
-            .map_err(|_| Error::DelegationExpiredOrNotYetValid)?;
+        let signed_proof: SignedDelegationProof =
+            bincode::deserialize(proof_bytes).map_err(|_| Error::DelegationExpiredOrNotYetValid)?;
         let proof = &signed_proof.claims;
 
         // Verify owner (issuer) signed the claims — supports 0x and did:key (principal_to_public_key)
         let issuer_pubkey = principal_to_public_key(&proof.issuer).map_err(|e| match e {
-            Error::PrincipalBindingFailed(msg) => {
-                Error::PrincipalBindingFailed(format!("Issuer not a valid principal (0x or did:key): {}", msg))
-            }
+            Error::PrincipalBindingFailed(msg) => Error::PrincipalBindingFailed(format!(
+                "Issuer not a valid principal (0x or did:key): {}",
+                msg
+            )),
             other => other,
         })?;
         let message = delegation_claims_to_sign(proof);
@@ -512,7 +510,11 @@ pub fn validate_close_meter(state: &State, tx: &SignedTx) -> Result<()> {
 ///
 /// Checks: signer == owner, owner account exists, nonce matches.
 pub fn validate_revoke_delegation(state: &State, tx: &SignedTx) -> Result<()> {
-    let Transaction::RevokeDelegation { owner, capability_id: _ } = &tx.kind else {
+    let Transaction::RevokeDelegation {
+        owner,
+        capability_id: _,
+    } = &tx.kind
+    else {
         return Err(Error::InvalidTransaction(
             "Expected RevokeDelegation transaction".to_string(),
         ));
@@ -876,7 +878,9 @@ mod tests {
         let multibase = "did:key:z".to_string() + &bs58::encode(payload).into_string();
         let err = principal_to_chain_address(&multibase).unwrap_err();
         match &err {
-            Error::PrincipalBindingFailed(msg) => assert!(msg.contains("Ed25519") || msg.contains("0xed")),
+            Error::PrincipalBindingFailed(msg) => {
+                assert!(msg.contains("Ed25519") || msg.contains("0xed"))
+            }
             _ => panic!("expected PrincipalBindingFailed, got {:?}", err),
         }
     }
@@ -893,7 +897,10 @@ mod tests {
         payload.extend_from_slice(&key_bytes);
         let did_key = "did:key:z".to_string() + &bs58::encode(payload).into_string();
         let from_did = principal_to_public_key(&did_key).unwrap();
-        assert_eq!(from_did, key_bytes, "principal_to_public_key(did:key) must match 0x pubkey for proof verification");
+        assert_eq!(
+            from_did, key_bytes,
+            "principal_to_public_key(did:key) must match 0x pubkey for proof verification"
+        );
     }
 
     #[test]
@@ -907,7 +914,11 @@ mod tests {
         let err = principal_to_public_key(&multibase).unwrap_err();
         match &err {
             Error::PrincipalBindingFailed(msg) => {
-                assert!(msg.contains("length") || msg.contains("0xed"), "expected length/header message: {}", msg);
+                assert!(
+                    msg.contains("length") || msg.contains("0xed"),
+                    "expected length/header message: {}",
+                    msg
+                );
             }
             _ => panic!("expected PrincipalBindingFailed, got {:?}", err),
         }

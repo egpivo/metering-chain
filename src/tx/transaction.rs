@@ -199,9 +199,8 @@ pub fn deserialize_signed_tx_bincode(bytes: &[u8]) -> crate::error::Result<Signe
     if let Ok(p2) = bincode::deserialize::<SignedTxPhase2>(bytes) {
         return Ok(p2.into());
     }
-    let legacy = bincode::deserialize::<SignedTxLegacy>(bytes).map_err(|e| {
-        crate::error::Error::StateError(format!("Failed to deserialize tx: {}", e))
-    })?;
+    let legacy = bincode::deserialize::<SignedTxLegacy>(bytes)
+        .map_err(|e| crate::error::Error::StateError(format!("Failed to deserialize tx: {}", e)))?;
     Ok(legacy.into())
 }
 

@@ -439,10 +439,12 @@ pub fn run(cli: Cli) -> Result<()> {
                     max_cost: max_cost.clone(),
                 };
                 let proof_bytes = wallet.sign_delegation_proof(&claims);
-                fs::write(output, &proof_bytes).map_err(|e| {
-                    Error::StateError(format!("Failed to write proof file: {}", e))
-                })?;
-                println!("Created signed delegation proof: {} bytes", proof_bytes.len());
+                fs::write(output, &proof_bytes)
+                    .map_err(|e| Error::StateError(format!("Failed to write proof file: {}", e)))?;
+                println!(
+                    "Created signed delegation proof: {} bytes",
+                    proof_bytes.len()
+                );
                 Ok(())
             }
             WalletSub::RevokeDelegation {
@@ -452,9 +454,8 @@ pub fn run(cli: Cli) -> Result<()> {
                 output,
             } => {
                 let (state, _) = load_or_create_state(&storage, &config)?;
-                let nonce_val = nonce.unwrap_or_else(|| {
-                    state.get_account(&address).map(|a| a.nonce()).unwrap_or(0)
-                });
+                let nonce_val = nonce
+                    .unwrap_or_else(|| state.get_account(&address).map(|a| a.nonce()).unwrap_or(0));
                 let wallets =
                     metering_chain::wallet::Wallets::new(config.get_wallets_path().clone());
                 let kind = metering_chain::tx::Transaction::RevokeDelegation {
@@ -474,8 +475,9 @@ pub fn run(cli: Cli) -> Result<()> {
                 Ok(())
             }
             WalletSub::CapabilityId { proof_file } => {
-                let bytes = fs::read(&proof_file)
-                    .map_err(|e| Error::StateError(format!("Failed to read {}: {}", proof_file, e)))?;
+                let bytes = fs::read(&proof_file).map_err(|e| {
+                    Error::StateError(format!("Failed to read {}: {}", proof_file, e))
+                })?;
                 let cap_id = metering_chain::tx::capability_id(&bytes);
                 println!("{}", cap_id);
                 Ok(())

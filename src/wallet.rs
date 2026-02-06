@@ -3,7 +3,9 @@
 
 use crate::error::{Error, Result};
 use crate::tx::transaction::PAYLOAD_VERSION_V2;
-use crate::tx::validation::{build_signed_proof, delegation_claims_to_sign, DelegationProofMinimal};
+use crate::tx::validation::{
+    build_signed_proof, delegation_claims_to_sign, DelegationProofMinimal,
+};
 use crate::tx::{SignedTx, Transaction};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use rand::rngs::OsRng;
