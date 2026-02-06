@@ -435,8 +435,8 @@ pub fn run(cli: Cli) -> Result<()> {
                     audience: audience.clone(),
                     service_id: service_id.clone(),
                     ability: ability.clone(),
-                    max_units: max_units.clone(),
-                    max_cost: max_cost.clone(),
+                    max_units,
+                    max_cost,
                 };
                 let proof_bytes = wallet.sign_delegation_proof(&claims);
                 fs::write(output, &proof_bytes)
