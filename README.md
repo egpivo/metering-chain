@@ -53,7 +53,17 @@ Strict flow with real signatures (no `--allow-unsigned`):
 ./examples/signed/run_signed_demo.sh
 ```
 
-The script runs `init`, creates two wallets (authority + user), sets `METERING_CHAIN_MINTERS`, then Mint → OpenMeter → Consume → CloseMeter with signed tx. See `docs/phase2_signed_demo.md` and `examples/signed/README.md` for manual steps and kind templates.
+The script runs `init`, creates two wallets (authority + user), sets `METERING_CHAIN_MINTERS`, then Mint, OpenMeter, Consume, CloseMeter with signed tx. See `docs/phase2_signed_demo.md` and `examples/signed/README.md` for manual steps and kind templates.
+
+### Phase 3 delegation demo
+
+Delegation flow with `signer != owner`: no-proof reject, with-proof accept, revoke then reject.
+
+```bash
+./examples/phase3_demo/run_phase3_demo.sh
+```
+
+See `examples/phase3_demo/README.md` for expected scenes and manual steps.
 
 ---
 
@@ -106,8 +116,9 @@ cargo run --bin metering-chain -- --format json account <address>
 * `docs/state_transitions.md`
 * `docs/invariants.md`
 * `docs/architecture.md`
-* `docs/phase2_signed_demo.md` – Phase 2 signed flow (wallet create → sign → apply)
+* `docs/phase2_signed_demo.md` – Phase 2 signed flow (wallet create, sign, apply)
 * `docs/phase_ii_implementation.md` – Phase II implementation plan and status
+* `examples/phase3_demo/README.md` – Phase 3 delegation demo (scenes, commands, expected outcomes)
 
 ## Architecture
 

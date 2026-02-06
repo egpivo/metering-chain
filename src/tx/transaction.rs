@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+/// Payload version: absent or 1 = v1 (legacy), 2 = v2 (Phase 3 delegation).
+pub const PAYLOAD_VERSION_V1: u8 = 1;
+pub const PAYLOAD_VERSION_V2: u8 = 2;
+
 /// Pricing model for consumption transactions
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Pricing {
@@ -29,13 +33,31 @@ pub enum Transaction {
     },
     /// Close a meter and return locked deposit
     CloseMeter { owner: String, service_id: String },
+    /// Revoke a delegation capability (owner-signed). Apply adds capability_id to revoked set.
+    RevokeDelegation {
+        owner: String,
+        capability_id: String,
+    },
 }
 
-/// Payload used for canonical signing (signer + nonce + kind, no signature).
+/// Payload V1: canonical signing (signer + nonce + kind). Used for legacy and owner-signed tx.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SignablePayload {
     pub signer: String,
     pub nonce: u64,
+    #[serde(rename = "kind")]
+    pub kind: Transaction,
+}
+
+/// Payload V2: includes delegation fields. Required for delegated Consume.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PayloadV2 {
+    pub payload_version: u8,
+    pub signer: String,
+    pub nonce: u64,
+    pub nonce_account: Option<String>,
+    pub valid_at: Option<u64>,
+    pub delegation_proof: Option<Vec<u8>>,
     #[serde(rename = "kind")]
     pub kind: Transaction,
 }
@@ -48,22 +70,63 @@ struct SignedTxLegacy {
     pub kind: Transaction,
 }
 
+/// Phase 2 tx.log layout (signer, nonce, kind, signature). Used for backward compatibility.
+#[derive(Deserialize)]
+struct SignedTxPhase2 {
+    pub signer: String,
+    pub nonce: u64,
+    pub kind: Transaction,
+    #[serde(default)]
+    pub signature: Option<Vec<u8>>,
+}
+
 impl From<SignedTxLegacy> for SignedTx {
     fn from(l: SignedTxLegacy) -> Self {
         SignedTx {
+            payload_version: None,
             signer: l.signer,
             nonce: l.nonce,
+            nonce_account: None,
+            valid_at: None,
+            delegation_proof: None,
             kind: l.kind,
             signature: None,
         }
     }
 }
 
-/// Signed transaction wrapper with signer, nonce, and optional signature (Phase 2).
+impl From<SignedTxPhase2> for SignedTx {
+    fn from(p: SignedTxPhase2) -> Self {
+        SignedTx {
+            payload_version: None,
+            signer: p.signer,
+            nonce: p.nonce,
+            nonce_account: None,
+            valid_at: None,
+            delegation_proof: None,
+            kind: p.kind,
+            signature: p.signature,
+        }
+    }
+}
+
+/// Signed transaction wrapper (Phase 2 + Phase 3 v2 fields).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SignedTx {
+    /// Absent or 1 = v1 payload; 2 = v2. Delegated Consume must use 2.
+    #[serde(default)]
+    pub payload_version: Option<u8>,
     pub signer: String,
     pub nonce: u64,
+    /// Some(owner) for delegated consume (owner-nonce).
+    #[serde(default)]
+    pub nonce_account: Option<String>,
+    /// Reference time for delegation expiry (required for delegated consume).
+    #[serde(default)]
+    pub valid_at: Option<u64>,
+    /// UCAN/ReCap proof bytes (required for delegated consume).
+    #[serde(default)]
+    pub delegation_proof: Option<Vec<u8>>,
     pub kind: Transaction,
     /// Ed25519 signature over canonical payload. None = legacy/unsigned (Phase 1 replay).
     #[serde(default)]
@@ -73,36 +136,72 @@ pub struct SignedTx {
 impl SignedTx {
     pub fn new(signer: String, nonce: u64, kind: Transaction) -> Self {
         SignedTx {
+            payload_version: None,
             signer,
             nonce,
+            nonce_account: None,
+            valid_at: None,
+            delegation_proof: None,
             kind,
             signature: None,
         }
     }
 
-    /// Canonical bytes to sign (bincode of signer, nonce, kind). Verification must use the same format.
+    /// True if this is a delegated Consume (signer != owner or has delegation_proof).
+    pub fn is_delegated_consume(&self) -> bool {
+        match &self.kind {
+            Transaction::Consume { owner, .. } => {
+                self.signer != *owner || self.delegation_proof.is_some()
+            }
+            _ => false,
+        }
+    }
+
+    /// Effective payload version: None/Some(1) => v1, Some(2) => v2.
+    pub fn effective_payload_version(&self) -> u8 {
+        match self.payload_version {
+            Some(2) => PAYLOAD_VERSION_V2,
+            _ => PAYLOAD_VERSION_V1,
+        }
+    }
+
+    /// Canonical bytes to sign. Uses PayloadV1 or PayloadV2 per effective_payload_version.
     pub fn message_to_sign(&self) -> crate::error::Result<Vec<u8>> {
-        let payload = SignablePayload {
-            signer: self.signer.clone(),
-            nonce: self.nonce,
-            kind: self.kind.clone(),
-        };
-        bincode::serialize(&payload)
-            .map_err(|e| crate::error::Error::InvalidTransaction(e.to_string()))
+        if self.effective_payload_version() == PAYLOAD_VERSION_V2 {
+            let payload = PayloadV2 {
+                payload_version: PAYLOAD_VERSION_V2,
+                signer: self.signer.clone(),
+                nonce: self.nonce,
+                nonce_account: self.nonce_account.clone(),
+                valid_at: self.valid_at,
+                delegation_proof: self.delegation_proof.clone(),
+                kind: self.kind.clone(),
+            };
+            bincode::serialize(&payload)
+                .map_err(|e| crate::error::Error::InvalidTransaction(e.to_string()))
+        } else {
+            let payload = SignablePayload {
+                signer: self.signer.clone(),
+                nonce: self.nonce,
+                kind: self.kind.clone(),
+            };
+            bincode::serialize(&payload)
+                .map_err(|e| crate::error::Error::InvalidTransaction(e.to_string()))
+        }
     }
 }
 
-/// Deserialize SignedTx from bincode; accepts Phase 1 layout (no signature) for backward compatibility.
+/// Deserialize SignedTx from bincode. Tries full SignedTx (Phase 3), then Phase 2 layout (signer, nonce, kind, signature), then Phase 1 (no signature).
 pub fn deserialize_signed_tx_bincode(bytes: &[u8]) -> crate::error::Result<SignedTx> {
-    match bincode::deserialize::<SignedTx>(bytes) {
-        Ok(tx) => Ok(tx),
-        Err(_) => {
-            let legacy = bincode::deserialize::<SignedTxLegacy>(bytes).map_err(|e| {
-                crate::error::Error::StateError(format!("Failed to deserialize tx: {}", e))
-            })?;
-            Ok(legacy.into())
-        }
+    if let Ok(tx) = bincode::deserialize::<SignedTx>(bytes) {
+        return Ok(tx);
     }
+    if let Ok(p2) = bincode::deserialize::<SignedTxPhase2>(bytes) {
+        return Ok(p2.into());
+    }
+    let legacy = bincode::deserialize::<SignedTxLegacy>(bytes)
+        .map_err(|e| crate::error::Error::StateError(format!("Failed to deserialize tx: {}", e)))?;
+    Ok(legacy.into())
 }
 
 #[cfg(test)]

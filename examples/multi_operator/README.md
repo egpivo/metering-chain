@@ -90,7 +90,7 @@ If you don't have matplotlib installed:
 python -m pip install matplotlib
 ```
 
-## 2) Convert CSV → Consume NDJSON (manual CSV)
+## 2) Convert CSV to Consume NDJSON (manual CSV)
 
 ```bash
 ./examples/multi_operator/helium_rewards_to_consume.py \

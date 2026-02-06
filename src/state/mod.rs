@@ -7,7 +7,7 @@ pub use apply::apply;
 pub use meter::Meter;
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Meter key: composite key for identifying meters by (owner, service_id)
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,6 +22,13 @@ impl MeterKey {
     }
 }
 
+/// Per-capability cumulative consumption for caveat checks (delegated consume).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CapabilityConsumption {
+    pub consumed_units: u64,
+    pub consumed_cost: u64,
+}
+
 /// Core domain state: aggregates all accounts and meters
 ///
 /// State is fully reconstructible by replaying transactions from genesis.
@@ -33,6 +40,14 @@ pub struct State {
 
     /// All meters indexed by (owner, service_id)
     pub meters: HashMap<MeterKey, Meter>,
+
+    /// Consumed units/cost per capability_id (lowercase hex) for caveat limits.
+    #[serde(default)]
+    pub capability_consumption: HashMap<String, CapabilityConsumption>,
+
+    /// Revoked capability IDs (owner-signed RevokeDelegation). Delegated Consume with this capability_id is rejected.
+    #[serde(default)]
+    pub revoked_capability_ids: HashSet<String>,
 }
 
 impl State {
@@ -41,7 +56,37 @@ impl State {
         State {
             accounts: HashMap::new(),
             meters: HashMap::new(),
+            capability_consumption: HashMap::new(),
+            revoked_capability_ids: HashSet::new(),
         }
+    }
+
+    /// Returns true if the capability has been revoked (RevokeDelegation applied).
+    pub fn is_capability_revoked(&self, capability_id: &str) -> bool {
+        self.revoked_capability_ids.contains(capability_id)
+    }
+
+    /// Mark a capability as revoked (used by apply RevokeDelegation).
+    pub fn revoke_capability(&mut self, capability_id: String) {
+        self.revoked_capability_ids.insert(capability_id);
+    }
+
+    /// Get cumulative consumption for a capability_id (0,0 if unknown).
+    pub fn get_capability_consumption(&self, capability_id: &str) -> (u64, u64) {
+        self.capability_consumption
+            .get(capability_id)
+            .map(|c| (c.consumed_units, c.consumed_cost))
+            .unwrap_or((0, 0))
+    }
+
+    /// Record consumption for a capability (add units and cost to cumulative).
+    pub fn record_capability_consumption(&mut self, capability_id: String, units: u64, cost: u64) {
+        let entry = self
+            .capability_consumption
+            .entry(capability_id)
+            .or_default();
+        entry.consumed_units = entry.consumed_units.saturating_add(units);
+        entry.consumed_cost = entry.consumed_cost.saturating_add(cost);
     }
 
     /// Get or create an account (returns mutable reference)

@@ -3,6 +3,7 @@ use metering_chain::config::Config;
 use metering_chain::error::{Error, Result};
 use metering_chain::state::{apply, State};
 use metering_chain::storage::{FileStorage, Storage};
+use metering_chain::tx::validation::ValidationContext;
 use metering_chain::tx::SignedTx;
 use metering_chain::wallet;
 use std::collections::HashSet;
@@ -91,6 +92,87 @@ pub enum WalletSub {
         /// JSON file with transaction kind only, e.g. {"Consume":{"owner":"0x...","service_id":"s","units":1,"pricing":{"UnitPrice":2}}}
         #[arg(short, long)]
         file: String,
+
+        /// Delegated sign: consume on behalf of this owner (nonce_account). Requires --nonce and proof/valid_at.
+        #[arg(long)]
+        for_owner: Option<String>,
+
+        /// Nonce to use (required for delegated sign; otherwise read from state for signer/owner)
+        #[arg(long)]
+        nonce: Option<u64>,
+
+        /// Reference time (valid_at) for delegated consume. Default: current Unix time.
+        #[arg(long)]
+        valid_at: Option<u64>,
+
+        /// Path to file containing delegation proof bytes (owner-signed; use create-delegation-proof). Required for --for-owner.
+        #[arg(long)]
+        proof_file: Option<String>,
+    },
+
+    /// Create owner-signed delegation proof (write to file). Issuer = owner address, audience = delegate.
+    CreateDelegationProof {
+        /// Owner wallet address (issuer; must exist in wallets)
+        #[arg(short, long)]
+        address: String,
+
+        /// Delegate address (audience)
+        #[arg(long)]
+        audience: String,
+
+        /// Scope: service_id (must match Consume tx service_id)
+        #[arg(long)]
+        service_id: String,
+
+        /// Scope: ability (e.g. "consume"; optional; if set must match tx type)
+        #[arg(long)]
+        ability: Option<String>,
+
+        /// Issued-at time (Unix seconds)
+        #[arg(long)]
+        iat: u64,
+
+        /// Expiry time (Unix seconds)
+        #[arg(long)]
+        exp: u64,
+
+        /// Optional caveat: max units for this capability
+        #[arg(long)]
+        max_units: Option<u64>,
+
+        /// Optional caveat: max cost for this capability
+        #[arg(long)]
+        max_cost: Option<u64>,
+
+        /// Output file path for proof bytes
+        #[arg(short, long)]
+        output: String,
+    },
+
+    /// Create owner-signed RevokeDelegation transaction (output JSON; apply separately).
+    RevokeDelegation {
+        /// Owner wallet address (signer; must exist in wallets)
+        #[arg(short, long)]
+        address: String,
+
+        /// Capability ID to revoke (e.g. from capability_id(proof_bytes), lowercase hex)
+        #[arg(short, long)]
+        capability_id: String,
+
+        /// Nonce to use; if omitted, read from state for owner
+        #[arg(long)]
+        nonce: Option<u64>,
+
+        /// Write signed tx JSON to file instead of stdout
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+
+    /// Print capability_id (sha256 hex) for a delegation proof file. Use with revoke-delegation --capability-id.
+    CapabilityId {
+        /// Path to file containing delegation proof bytes
+        #[arg(short, long)]
+        proof_file: String,
     },
 }
 
@@ -101,11 +183,12 @@ pub fn load_or_create_state(storage: &FileStorage, _config: &Config) -> Result<(
             let txs = storage.load_txs_from(last_tx_id + 1)?;
             let mut current_state = state;
             let mut current_tx_id = last_tx_id;
+            let replay_ctx = ValidationContext::replay();
             for tx in txs {
                 if tx.signature.is_some() {
                     wallet::verify_signature(&tx)?;
                 }
-                current_state = apply(&current_state, &tx, None)?;
+                current_state = apply(&current_state, &tx, &replay_ctx, None)?;
                 current_tx_id += 1;
             }
 
@@ -219,12 +302,20 @@ pub fn run(cli: Cli) -> Result<()> {
                 eprintln!("Warning: applying unsigned transaction (legacy/unsafe)");
             }
 
+            let now = metering_chain::current_timestamp().max(0) as u64;
+            const DEFAULT_MAX_AGE: u64 = 300;
+            let live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+
             // Validate transaction
-            let cost_opt =
-                metering_chain::tx::validation::validate(&state, &signed_tx, Some(&minters))?;
+            let cost_opt = metering_chain::tx::validation::validate(
+                &state,
+                &signed_tx,
+                &live_ctx,
+                Some(&minters),
+            )?;
 
             if dry_run {
-                println!("✓ Transaction is valid");
+                println!("Transaction is valid");
                 if let Some(cost) = cost_opt {
                     println!("  Cost: {}", cost);
                 }
@@ -232,14 +323,14 @@ pub fn run(cli: Cli) -> Result<()> {
             }
 
             // Apply transaction
-            state = apply(&state, &signed_tx, Some(&minters))?;
+            state = apply(&state, &signed_tx, &live_ctx, Some(&minters))?;
             last_tx_id += 1;
 
             // Persist transaction and state
             storage.append_tx(&signed_tx)?;
             storage.persist_state(&state, last_tx_id)?;
 
-            println!("✓ Transaction applied successfully");
+            println!("Transaction applied successfully");
             if let Some(cost) = cost_opt {
                 println!("  Cost: {}", cost);
             }
@@ -271,9 +362,15 @@ pub fn run(cli: Cli) -> Result<()> {
                 }
                 Ok(())
             }
-            WalletSub::Sign { address, file } => {
+            WalletSub::Sign {
+                address,
+                file,
+                for_owner,
+                nonce,
+                valid_at,
+                proof_file,
+            } => {
                 let (state, _) = load_or_create_state(&storage, &config)?;
-                let nonce = state.get_account(&address).map(|a| a.nonce()).unwrap_or(0);
                 let kind_json = fs::read_to_string(&file).map_err(|e| {
                     Error::InvalidTransaction(format!("Failed to read {}: {}", file, e))
                 })?;
@@ -281,8 +378,108 @@ pub fn run(cli: Cli) -> Result<()> {
                     .map_err(|e| Error::InvalidTransaction(format!("Invalid kind JSON: {}", e)))?;
                 let wallets =
                     metering_chain::wallet::Wallets::new(config.get_wallets_path().clone());
-                let signed = wallets.sign_transaction(&address, nonce, kind)?;
+
+                let signed = if let Some(owner) = for_owner {
+                    let nonce_val = nonce.ok_or_else(|| {
+                        Error::InvalidTransaction("Delegated sign requires --nonce".to_string())
+                    })?;
+                    let proof_bytes = match &proof_file {
+                        Some(path) => fs::read(path).map_err(|e| {
+                            Error::InvalidTransaction(format!("Failed to read proof file: {}", e))
+                        })?,
+                        None => {
+                            return Err(Error::InvalidTransaction(
+                                "Delegated sign requires --proof-file".to_string(),
+                            ));
+                        }
+                    };
+                    let valid_at_sec = valid_at
+                        .unwrap_or_else(|| metering_chain::current_timestamp().max(0) as u64);
+                    wallets.sign_transaction_v2(
+                        &address,
+                        nonce_val,
+                        owner,
+                        valid_at_sec,
+                        proof_bytes,
+                        kind,
+                    )?
+                } else {
+                    let nonce_val = nonce.unwrap_or_else(|| {
+                        state.get_account(&address).map(|a| a.nonce()).unwrap_or(0)
+                    });
+                    wallets.sign_transaction(&address, nonce_val, kind)?
+                };
                 println!("{}", serde_json::to_string_pretty(&signed).unwrap());
+                Ok(())
+            }
+            WalletSub::CreateDelegationProof {
+                address,
+                audience,
+                service_id,
+                ability,
+                iat,
+                exp,
+                max_units,
+                max_cost,
+                output,
+            } => {
+                let wallets =
+                    metering_chain::wallet::Wallets::new(config.get_wallets_path().clone());
+                let wallet = wallets.get_wallet(&address).ok_or_else(|| {
+                    Error::InvalidTransaction(format!("Wallet not found: {}", address))
+                })?;
+                let claims = metering_chain::tx::DelegationProofMinimal {
+                    iat,
+                    exp,
+                    issuer: address.clone(),
+                    audience: audience.clone(),
+                    service_id: service_id.clone(),
+                    ability: ability.clone(),
+                    max_units,
+                    max_cost,
+                };
+                let proof_bytes = wallet.sign_delegation_proof(&claims);
+                fs::write(output, &proof_bytes)
+                    .map_err(|e| Error::StateError(format!("Failed to write proof file: {}", e)))?;
+                println!(
+                    "Created signed delegation proof: {} bytes",
+                    proof_bytes.len()
+                );
+                Ok(())
+            }
+            WalletSub::RevokeDelegation {
+                address,
+                capability_id,
+                nonce,
+                output,
+            } => {
+                let (state, _) = load_or_create_state(&storage, &config)?;
+                let nonce_val = nonce
+                    .unwrap_or_else(|| state.get_account(&address).map(|a| a.nonce()).unwrap_or(0));
+                let wallets =
+                    metering_chain::wallet::Wallets::new(config.get_wallets_path().clone());
+                let kind = metering_chain::tx::Transaction::RevokeDelegation {
+                    owner: address.clone(),
+                    capability_id: capability_id.clone(),
+                };
+                let signed = wallets.sign_transaction(&address, nonce_val, kind)?;
+                let json = serde_json::to_string_pretty(&signed).unwrap();
+                if let Some(path) = output {
+                    fs::write(&path, &json).map_err(|e| {
+                        Error::StateError(format!("Failed to write {}: {}", path, e))
+                    })?;
+                    println!("Wrote signed RevokeDelegation to {}", path);
+                } else {
+                    println!("{}", json);
+                }
+                Ok(())
+            }
+            WalletSub::CapabilityId { proof_file } => {
+                let bytes = fs::read(&proof_file).map_err(|e| {
+                    Error::StateError(format!("Failed to read {}: {}", proof_file, e))
+                })?;
+                let cap_id = metering_chain::tx::capability_id(&bytes);
+                println!("{}", cap_id);
                 Ok(())
             }
         },

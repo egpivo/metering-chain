@@ -40,6 +40,12 @@ distributions and converts them into `Consume` transactions.
 See `examples/multi_operator/README.md` for a multi-operator flow that maps
 hotspot rewards to per-operator meters.
 
+## Phase 3 delegation demo
+
+See `examples/phase3_demo/README.md` for the Phase 3 demo script that runs the
+four required scenes: delegate signs Consume, no-proof rejected, with-proof
+accepted, revoke-then-reject.
+
 ## Files (minimal)
 
 - `examples/tx/01_mint_alice.json` - Mint 1000 to 0x0000000000000000000000000000000000000A11 (authority only)

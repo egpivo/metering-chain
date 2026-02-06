@@ -35,9 +35,10 @@ Total value is preserved across state transitions, except for explicit mint or b
 ## Meter Invariants
 
 ### INV-4: Ownership Authorization
-Only the meter owner may issue consume and close operations for that meter.
+Only the meter owner or a valid delegate may issue **consume** operations for that meter. Only the meter owner may issue **close** operations (delegation for CloseMeter is out of scope in v1).
 
-- Checked by matching transaction signer and meter owner
+- Consume: checked by `signer == owner` or by a valid delegation proof (owner-signed, bound to owner/service_id, within expiry and caveats); delegated Consume uses the owner’s nonce.
+- Close: checked by matching transaction signer and meter owner.
 
 ---
 
@@ -72,10 +73,11 @@ Only designated authority accounts may issue mint transactions.
 ---
 
 ### INV-9: Nonce Monotonicity
-All account-issued transactions require `signer.nonce == account.nonce`.
+For each account-issued transaction, the nonce consumed is that of a single designated account (the *nonce account*), and `account[nonce_account].nonce == tx.nonce` before apply.
 
-- Enforced for OpenMeter, Consume, and CloseMeter
-- Mint bypasses nonce (authority operation)
+- OpenMeter, CloseMeter: nonce account = signer (and signer == owner).
+- Consume: nonce account = signer when owner-signed, or owner when delegate-signed (delegated Consume uses owner’s nonce).
+- Mint bypasses nonce (authority operation).
 
 ---
 

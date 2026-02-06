@@ -41,10 +41,10 @@ Represents a usage ledger for a specific service owned by an account.
 - **OpenMeter**: Creates a new meter or reopens a closed meter
   - If meter does not exist: create with `total_units = 0`, `total_spent = 0`, `locked_deposit = deposit`
   - If meter exists but is inactive: reactivate, preserve `total_units` and `total_spent`, set new `locked_deposit = deposit`
-- **CloseMeter**: Active → Inactive, returns `locked_deposit` to balance
+- **CloseMeter**: Active to Inactive, returns `locked_deposit` to balance
 
 **Invariants**
-- Only the owner may operate the meter
+- Only the owner (or a valid delegate for Consume) may operate the meter; CloseMeter is owner-only in v1.
 - At most one active meter per `(owner, service_id)`
 - `total_units` and `total_spent` are monotonic
 - `locked_deposit` represents committed funds
@@ -102,10 +102,11 @@ Records usage and deducts cost.
 - `service_id: String`
 - `units: u64`
 - `pricing: Pricing`
+- Optional (Phase 3): `nonce_account`, `valid_at`, `delegation_proof` for delegated Consume
 
 **Rules**
-- `signer == owner`
-- `accounts[signer].nonce == nonce`
+- **Authorization:** `signer == owner` **OR** signer has a valid delegation proof for `(owner, service_id)` (owner-signed proof, within expiry and caveats). Delegated Consume requires payload_version v2.
+- **Nonce:** the nonce consumed is that of the *nonce account* (owner when delegated, otherwise signer); `accounts[nonce_account].nonce == nonce`.
 - Meter exists and is active
 - `units > 0`
 - Pricing parameters are strictly positive (`UnitPrice(price)` where `price > 0`, or `FixedCost(cost)` where `cost > 0`)
@@ -150,8 +151,8 @@ flowchart TD
 ```
 
 **Validation checks:**
-- Nonce monotonicity (`accounts[signer].nonce == tx.nonce`) for account-issued txs
-- Authorization (Mint: `from ∈ authorized_minters`; Meter ops: `signer == owner`)
+- Nonce monotonicity for the account that supplies the nonce (owner for delegated Consume, signer otherwise)
+- Authorization (Mint: `from ∈ authorized_minters`; Consume: `signer == owner` or valid delegation; OpenMeter/CloseMeter: `signer == owner`)
 - Sufficient balance (for deposits/consumption)
 - Meter state (exists, active, uniqueness)
 - Pricing/units validity
