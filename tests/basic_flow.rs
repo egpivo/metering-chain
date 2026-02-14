@@ -2060,7 +2060,6 @@ fn test_phase3_revocation_rejected_consume() {
 #[test]
 fn test_pre_phase4_replay_determinism_baseline() {
     let minters = get_authorized_minters();
-    let mut state = State::new();
 
     let txs = vec![
         SignedTx::new(
