@@ -2,6 +2,13 @@
 
 Documented extension points for Settlement and Dispute contexts after Pre-Phase 4 refactoring.
 
+## Hook Pattern (WS-R1)
+
+- **ApplyHook** trait (`src/state/hook.rs`): injectable strategy for metering/settlement interception
+- **StateMachine&lt;M: ApplyHook&gt;** (`src/state/apply.rs`): coordinates hook and core state transitions
+- **NoOpHook**: default impl for backward compatibility
+- Phase 4 SettlementHook will implement `on_consume_recorded` to record consumption for settlement windows
+
 ## Validation (WS-R2)
 
 - **Flow**: auth checks → domain checks → replay/evidence checks (see `docs/validation_flow.md`)

@@ -11,7 +11,7 @@ use crate::wallet;
 
 /// Replay transaction log from storage to current tip.
 ///
-/// - If a snapshot exists: load it, then replay txs from `last_tx_id + 1`.
+/// - If a snapshot exists: load it, then replay txs from `snapshot_tx_id` (next tx to apply; 0-indexed).
 /// - If no snapshot: replay from genesis (tx_id 0).
 /// - Uses `ValidationContext::replay()` and `None` for minters (replay mode).
 /// - Verifies signatures for signed txs to ensure log integrity.
