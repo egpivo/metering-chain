@@ -1989,3 +1989,89 @@ fn test_phase3_revocation_rejected_consume() {
         e => panic!("expected DelegationRevoked, got {:?}", e),
     }
 }
+
+// --- Pre-Phase 4 refactoring regression baseline ---
+
+/// Pre-Phase 4: determinism and invariant regression baseline.
+/// Replays same tx log twice and asserts identical state. Documents extension points for Phase 4.
+#[test]
+fn test_pre_phase4_replay_determinism_baseline() {
+    let minters = get_authorized_minters();
+    let mut state = State::new();
+
+    let txs = vec![
+        SignedTx::new(
+            "authority".to_string(),
+            0,
+            Transaction::Mint {
+                to: "alice".to_string(),
+                amount: 1000,
+            },
+        ),
+        SignedTx::new(
+            "alice".to_string(),
+            0,
+            Transaction::OpenMeter {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                deposit: 100,
+            },
+        ),
+        SignedTx::new(
+            "alice".to_string(),
+            1,
+            Transaction::Consume {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                units: 10,
+                pricing: Pricing::UnitPrice(5),
+            },
+        ),
+    ];
+
+    let rctx = replay_ctx();
+    let mut state_a = State::new();
+    for tx in &txs {
+        state_a = apply(
+            &state_a,
+            tx,
+            &rctx,
+            if matches!(tx.kind, Transaction::Mint { .. }) {
+                Some(&minters)
+            } else {
+                None
+            },
+        )
+        .unwrap();
+    }
+
+    let mut state_b = State::new();
+    for tx in &txs {
+        state_b = apply(
+            &state_b,
+            tx,
+            &rctx,
+            if matches!(tx.kind, Transaction::Mint { .. }) {
+                Some(&minters)
+            } else {
+                None
+            },
+        )
+        .unwrap();
+    }
+
+    assert_eq!(
+        state_a, state_b,
+        "Pre-Phase 4: same tx log replayed twice must yield identical state"
+    );
+}
+
+/// Pre-Phase 4: error_code() returns deterministic codes for UI mapping.
+#[test]
+fn test_pre_phase4_error_code_deterministic() {
+    assert_eq!(Error::DelegationRevoked.error_code(), "DELEGATION_REVOKED");
+    assert_eq!(
+        Error::DelegatedConsumeRequiresV2.error_code(),
+        "DELEGATED_CONSUME_REQUIRES_V2"
+    );
+}

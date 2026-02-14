@@ -1,5 +1,34 @@
 use thiserror::Error;
 
+/// Domain error codes for deterministic UI mapping.
+/// See docs/error_codes.md for the full taxonomy.
+impl Error {
+    pub fn error_code(&self) -> &'static str {
+        use Error::*;
+        match self {
+            MiningExhausted => "MINING_EXHAUSTED",
+            InvalidTransaction(_) => "INVALID_TRANSACTION",
+            StateError(_) => "STATE_ERROR",
+            SignatureVerification(_) => "SIGNATURE_VERIFICATION_FAILED",
+            DelegatedConsumeRequiresV2 => "DELEGATED_CONSUME_REQUIRES_V2",
+            DelegationProofMissing => "DELEGATION_PROOF_MISSING",
+            ValidAtMissing => "VALID_AT_MISSING",
+            NonceAccountMissingOrInvalid => "NONCE_ACCOUNT_MISSING_OR_INVALID",
+            InvalidValidationContextLiveNowMissing => "VALIDATION_CONTEXT_LIVE_NOW_MISSING",
+            InvalidValidationContextLiveMaxAgeMissing => "VALIDATION_CONTEXT_LIVE_MAX_AGE_MISSING",
+            ReferenceTimeFuture => "REFERENCE_TIME_FUTURE",
+            ReferenceTimeTooOld => "REFERENCE_TIME_TOO_OLD",
+            DelegationExpiredOrNotYetValid => "DELEGATION_EXPIRED_OR_NOT_YET_VALID",
+            PrincipalBindingFailed(_) => "PRINCIPAL_BINDING_FAILED",
+            DelegationIssuerOwnerMismatch => "DELEGATION_ISSUER_OWNER_MISMATCH",
+            DelegationAudienceSignerMismatch => "DELEGATION_AUDIENCE_SIGNER_MISMATCH",
+            CapabilityLimitExceeded => "CAPABILITY_LIMIT_EXCEEDED",
+            DelegationRevoked => "DELEGATION_REVOKED",
+            DelegationScopeMismatch => "DELEGATION_SCOPE_MISMATCH",
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Mining failed: exhausted nonce range without finding valid hash")]
