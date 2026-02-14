@@ -2,6 +2,7 @@ pub mod chain;
 pub mod config;
 pub mod error;
 pub mod evidence;
+pub mod replay;
 pub mod logger;
 pub mod state;
 pub mod storage;

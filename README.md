@@ -117,6 +117,7 @@ cargo run --bin metering-chain -- --format json account <address>
 * `docs/invariants.md`
 * `docs/architecture.md`
 * `docs/error_codes.md` – Error taxonomy for UI mapping
+* `docs/validation_flow.md` – Validation pipeline (auth → domain → replay/evidence)
 * `docs/naming_conventions.md` – Tx/event naming (Phase 4 ready)
 * `docs/phase4_extension_points.md` – Pre-Phase 4 refactoring; extension points for Settlement/Dispute
 * `docs/phase2_signed_demo.md` – Phase 2 signed flow (wallet create, sign, apply)

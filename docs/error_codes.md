@@ -26,6 +26,19 @@ Deterministic, non-ambiguous error codes for UI mapping. Phase 4 UX story maps t
 | `DELEGATION_REVOKED` | DelegationRevoked | Capability was revoked; obtain new proof |
 | `DELEGATION_SCOPE_MISMATCH` | DelegationScopeMismatch | Proof service_id/ability must match tx |
 
+## Validation Error Code Matrix (by Tx Type)
+
+| Tx Type | Possible Error Codes |
+|---------|----------------------|
+| Mint | `INVALID_TRANSACTION`, `MINT_*` (via InvalidTransaction message) |
+| OpenMeter | `INVALID_TRANSACTION` (signer/owner, nonce, balance, meter) |
+| Consume (owner) | `INVALID_TRANSACTION` (meter, units, pricing, signer, nonce, balance) |
+| Consume (delegated) | `DELEGATED_CONSUME_REQUIRES_V2`, `DELEGATION_PROOF_MISSING`, `VALID_AT_MISSING`, `NONCE_ACCOUNT_MISSING_OR_INVALID`, `VALIDATION_CONTEXT_LIVE_*`, `REFERENCE_TIME_*`, `DELEGATION_*`, `CAPABILITY_LIMIT_EXCEEDED`, `INVALID_TRANSACTION` |
+| CloseMeter | `INVALID_TRANSACTION` (signer, nonce, meter) |
+| RevokeDelegation | `INVALID_TRANSACTION` (signer, nonce) |
+
+Use `Error::error_code()` for deterministic UI mapping.
+
 ## Phase 4 (Planned)
 
 Extension points for Settlement and Dispute contexts. See `.local/phase4_spec.md` and `phase4_ux_story.md`.

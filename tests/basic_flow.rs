@@ -1,4 +1,5 @@
 use metering_chain::error::Error;
+use metering_chain::replay;
 use metering_chain::state::{apply, Account, Meter, State};
 use metering_chain::storage::{FileStorage, Storage};
 use metering_chain::tx::validation::ValidationContext;
@@ -26,28 +27,7 @@ fn create_test_storage() -> (FileStorage, TempDir) {
 }
 
 fn load_or_replay_state(storage: &FileStorage) -> (State, u64) {
-    match storage.load_state().unwrap() {
-        Some((snapshot_state, snapshot_tx_id)) => {
-            let txs_after_snapshot = storage.load_txs_from(snapshot_tx_id).unwrap();
-            let mut current_state = snapshot_state;
-            let mut current_tx_id = snapshot_tx_id;
-            for tx in txs_after_snapshot {
-                current_state = apply(&current_state, &tx, &replay_ctx(), None).unwrap();
-                current_tx_id += 1;
-            }
-            (current_state, current_tx_id)
-        }
-        None => {
-            let all_txs = storage.load_txs_from(0).unwrap();
-            let mut current_state = State::new();
-            let mut current_tx_id = 0u64;
-            for tx in all_txs {
-                current_state = apply(&current_state, &tx, &replay_ctx(), None).unwrap();
-                current_tx_id += 1;
-            }
-            (current_state, current_tx_id)
-        }
-    }
+    replay::replay_to_tip(storage).unwrap()
 }
 
 /// Test the complete happy path: Mint, OpenMeter, Consume, CloseMeter

@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use metering_chain::config::Config;
 use metering_chain::error::{Error, Result};
 use metering_chain::state::{apply, State};
+use metering_chain::replay;
 use metering_chain::storage::{FileStorage, Storage};
 use metering_chain::tx::validation::ValidationContext;
 use metering_chain::tx::SignedTx;
@@ -176,26 +177,13 @@ pub enum WalletSub {
     },
 }
 
-/// Load state from storage or return genesis state
+/// Load state from storage by replaying transaction log to tip.
 pub fn load_or_create_state(storage: &FileStorage, _config: &Config) -> Result<(State, u64)> {
-    match storage.load_state()? {
-        Some((state, last_tx_id)) => {
-            let txs = storage.load_txs_from(last_tx_id + 1)?;
-            let mut current_state = state;
-            let mut current_tx_id = last_tx_id;
-            let replay_ctx = ValidationContext::replay();
-            for tx in txs {
-                if tx.signature.is_some() {
-                    wallet::verify_signature(&tx)?;
-                }
-                current_state = apply(&current_state, &tx, &replay_ctx, None)?;
-                current_tx_id += 1;
-            }
+    replay::replay_to_tip(storage)
+}
 
-            Ok((current_state, current_tx_id))
-        }
-        None => Ok((State::new(), 0)),
-    }
+fn get_wallets(config: &Config) -> metering_chain::wallet::Wallets {
+    metering_chain::wallet::Wallets::new(config.get_wallets_path().clone())
 }
 
 /// Authorized minters: "authority" (legacy) + METERING_CHAIN_MINTERS env (comma-separated addresses).
@@ -343,15 +331,13 @@ pub fn run(cli: Cli) -> Result<()> {
                 fs::create_dir_all(config.get_data_dir()).map_err(|e| {
                     Error::StateError(format!("Failed to create data directory: {}", e))
                 })?;
-                let mut wallets =
-                    metering_chain::wallet::Wallets::new(config.get_wallets_path().clone());
+                let mut wallets = get_wallets(&config);
                 let address = wallets.create_wallet()?;
                 println!("Created wallet: {}", address);
                 Ok(())
             }
             WalletSub::List => {
-                let wallets =
-                    metering_chain::wallet::Wallets::new(config.get_wallets_path().clone());
+                let wallets = get_wallets(&config);
                 let addrs = wallets.get_addresses();
                 if addrs.is_empty() {
                     println!("No wallets. Run: metering-chain wallet create");
@@ -376,8 +362,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 })?;
                 let kind: metering_chain::tx::Transaction = serde_json::from_str(&kind_json)
                     .map_err(|e| Error::InvalidTransaction(format!("Invalid kind JSON: {}", e)))?;
-                let wallets =
-                    metering_chain::wallet::Wallets::new(config.get_wallets_path().clone());
+                let wallets = get_wallets(&config);
 
                 let signed = if let Some(owner) = for_owner {
                     let nonce_val = nonce.ok_or_else(|| {
@@ -423,8 +408,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 max_cost,
                 output,
             } => {
-                let wallets =
-                    metering_chain::wallet::Wallets::new(config.get_wallets_path().clone());
+                let wallets = get_wallets(&config);
                 let wallet = wallets.get_wallet(&address).ok_or_else(|| {
                     Error::InvalidTransaction(format!("Wallet not found: {}", address))
                 })?;
@@ -456,8 +440,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 let (state, _) = load_or_create_state(&storage, &config)?;
                 let nonce_val = nonce
                     .unwrap_or_else(|| state.get_account(&address).map(|a| a.nonce()).unwrap_or(0));
-                let wallets =
-                    metering_chain::wallet::Wallets::new(config.get_wallets_path().clone());
+                let wallets = get_wallets(&config);
                 let kind = metering_chain::tx::Transaction::RevokeDelegation {
                     owner: address.clone(),
                     capability_id: capability_id.clone(),

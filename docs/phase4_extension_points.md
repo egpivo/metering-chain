@@ -2,8 +2,10 @@
 
 Documented extension points for Settlement and Dispute contexts after Pre-Phase 4 refactoring.
 
-## Validation
+## Validation (WS-R2)
 
+- **Flow**: auth checks → domain checks → replay/evidence checks (see `docs/validation_flow.md`)
+- **Error matrix**: per-tx error codes in `docs/error_codes.md`
 - **Authorization vs Metering** (isolated):
   - `validate_consume_metering`: meter, units, pricing, cost (shared)
   - `validate_consume_delegation`: proof, time, scope, caveats, nonce, balance
@@ -25,7 +27,13 @@ Documented extension points for Settlement and Dispute contexts after Pre-Phase 
 
 - See `docs/naming_conventions.md` for Commands (VerbNoun) and Events (NounPastParticiple).
 
+## Replay Service (WS-R3)
+
+- `src/replay.rs`:
+  - `replay_to_tip(storage)`: load state from storage by replaying tx log to tip; used by CLI and tests
+  - `load_tx_slice(storage, from_tx_id)`: load tx slice for evidence bundle (Phase 4)
+
 ## Storage
 
-- `Storage::load_txs_from(from_tx_id)` already supports tx-slice loading for replay.
+- `Storage::load_txs_from(from_tx_id)` supports tx-slice loading for replay.
 - Phase 4 EvidenceBundle will reference `(from_tx_id, to_tx_id)` or similar.
