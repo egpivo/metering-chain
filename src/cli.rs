@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 use metering_chain::config::Config;
 use metering_chain::error::{Error, Result};
-use metering_chain::state::{apply, State};
 use metering_chain::replay;
+use metering_chain::state::{apply, State};
 use metering_chain::storage::{FileStorage, Storage};
 use metering_chain::tx::validation::ValidationContext;
 use metering_chain::tx::SignedTx;

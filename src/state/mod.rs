@@ -1,12 +1,12 @@
 pub mod account;
 pub mod apply;
-pub mod meter;
 pub mod hook;
+pub mod meter;
 
 pub use account::Account;
 pub use apply::{apply, StateMachine};
-pub use meter::Meter;
 pub use hook::{Hook, NoOpHook};
+pub use meter::Meter;
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};

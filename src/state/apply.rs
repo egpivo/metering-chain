@@ -93,9 +93,11 @@ impl<M: Hook> StateMachine<M> {
                     .get_meter(owner, service_id)
                     .map(|m| m.locked_deposit())
                     .unwrap_or(0);
-                self.hook.before_meter_close(owner, service_id, deposit_returned)?;
+                self.hook
+                    .before_meter_close(owner, service_id, deposit_returned)?;
                 apply_close_meter(&mut new_state, owner, service_id, &tx.signer)?;
-                self.hook.on_meter_closed(owner, service_id, deposit_returned)?;
+                self.hook
+                    .on_meter_closed(owner, service_id, deposit_returned)?;
             }
             Transaction::RevokeDelegation {
                 owner: _,
@@ -257,7 +259,9 @@ mod tests {
             _service_id: &str,
             _deposit: u64,
         ) -> Result<()> {
-            Err(Error::StateError("blocked by before_meter_open".to_string()))
+            Err(Error::StateError(
+                "blocked by before_meter_open".to_string(),
+            ))
         }
     }
 
@@ -505,11 +509,7 @@ mod tests {
         state
             .accounts
             .insert("alice".to_string(), Account::with_balance(1000));
-        state.insert_meter(Meter::new(
-            "alice".to_string(),
-            "storage".to_string(),
-            100,
-        ));
+        state.insert_meter(Meter::new("alice".to_string(), "storage".to_string(), 100));
         let minters = create_authorized_minters();
 
         let tx = SignedTx::new(

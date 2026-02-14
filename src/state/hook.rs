@@ -54,7 +54,12 @@ pub trait Hook {
     }
 
     /// Called after a meter is closed (deposit returned to owner).
-    fn on_meter_closed(&mut self, _owner: &str, _service_id: &str, _deposit_returned: u64) -> Result<()> {
+    fn on_meter_closed(
+        &mut self,
+        _owner: &str,
+        _service_id: &str,
+        _deposit_returned: u64,
+    ) -> Result<()> {
         Ok(())
     }
 }

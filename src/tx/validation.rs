@@ -310,97 +310,97 @@ fn validate_consume_delegation(
         return Err(Error::DelegatedConsumeRequiresV2);
     }
     let proof_bytes = tx
-            .delegation_proof
-            .as_ref()
-            .ok_or(Error::DelegationProofMissing)?;
-        let valid_at = tx.valid_at.ok_or(Error::ValidAtMissing)?;
-        let nonce_account = tx
-            .nonce_account
-            .as_ref()
-            .filter(|a| a.as_str() == owner)
-            .ok_or(Error::NonceAccountMissingOrInvalid)?;
+        .delegation_proof
+        .as_ref()
+        .ok_or(Error::DelegationProofMissing)?;
+    let valid_at = tx.valid_at.ok_or(Error::ValidAtMissing)?;
+    let nonce_account = tx
+        .nonce_account
+        .as_ref()
+        .filter(|a| a.as_str() == owner)
+        .ok_or(Error::NonceAccountMissingOrInvalid)?;
 
-        if ctx.mode == ValidationMode::Live {
-            let now = ctx
-                .now
-                .ok_or(Error::InvalidValidationContextLiveNowMissing)?;
-            let max_age = ctx
-                .max_age
-                .ok_or(Error::InvalidValidationContextLiveMaxAgeMissing)?;
-            if valid_at > now {
-                return Err(Error::ReferenceTimeFuture);
-            }
-            if now.saturating_sub(valid_at) > max_age {
-                return Err(Error::ReferenceTimeTooOld);
-            }
+    if ctx.mode == ValidationMode::Live {
+        let now = ctx
+            .now
+            .ok_or(Error::InvalidValidationContextLiveNowMissing)?;
+        let max_age = ctx
+            .max_age
+            .ok_or(Error::InvalidValidationContextLiveMaxAgeMissing)?;
+        if valid_at > now {
+            return Err(Error::ReferenceTimeFuture);
         }
-
-        let signed_proof: SignedDelegationProof =
-            bincode::deserialize(proof_bytes).map_err(|_| Error::DelegationExpiredOrNotYetValid)?;
-        let proof = &signed_proof.claims;
-
-        // Verify owner (issuer) signed the claims — supports 0x and did:key (principal_to_public_key)
-        let issuer_pubkey = principal_to_public_key(&proof.issuer).map_err(|e| match e {
-            Error::PrincipalBindingFailed(msg) => Error::PrincipalBindingFailed(format!(
-                "Issuer not a valid principal (0x or did:key): {}",
-                msg
-            )),
-            other => other,
-        })?;
-        let message = delegation_claims_to_sign(proof);
-        let sig_bytes: [u8; 64] = signed_proof
-            .signature
-            .as_slice()
-            .try_into()
-            .map_err(|_| Error::DelegationExpiredOrNotYetValid)?;
-        let sig = Signature::from_bytes(&sig_bytes);
-        let verifying_key = VerifyingKey::from_bytes(&issuer_pubkey)
-            .map_err(|_| Error::DelegationExpiredOrNotYetValid)?;
-        verifying_key
-            .verify(&message, &sig)
-            .map_err(|_| Error::DelegationExpiredOrNotYetValid)?;
-
-        if proof.iat > valid_at || valid_at >= proof.exp {
-            return Err(Error::DelegationExpiredOrNotYetValid);
+        if now.saturating_sub(valid_at) > max_age {
+            return Err(Error::ReferenceTimeTooOld);
         }
+    }
 
-        let issuer_addr = principal_to_chain_address(&proof.issuer)?;
-        let audience_addr = principal_to_chain_address(&proof.audience)?;
-        let owner_addr = principal_to_chain_address(owner)?;
-        let signer_addr = principal_to_chain_address(&tx.signer)?;
-        if owner_addr != issuer_addr {
-            return Err(Error::DelegationIssuerOwnerMismatch);
-        }
-        if signer_addr != audience_addr {
-            return Err(Error::DelegationAudienceSignerMismatch);
-        }
+    let signed_proof: SignedDelegationProof =
+        bincode::deserialize(proof_bytes).map_err(|_| Error::DelegationExpiredOrNotYetValid)?;
+    let proof = &signed_proof.claims;
 
-        // Scope: proof must be for this (owner, service_id, ability)
-        if proof.service_id != *service_id {
+    // Verify owner (issuer) signed the claims — supports 0x and did:key (principal_to_public_key)
+    let issuer_pubkey = principal_to_public_key(&proof.issuer).map_err(|e| match e {
+        Error::PrincipalBindingFailed(msg) => Error::PrincipalBindingFailed(format!(
+            "Issuer not a valid principal (0x or did:key): {}",
+            msg
+        )),
+        other => other,
+    })?;
+    let message = delegation_claims_to_sign(proof);
+    let sig_bytes: [u8; 64] = signed_proof
+        .signature
+        .as_slice()
+        .try_into()
+        .map_err(|_| Error::DelegationExpiredOrNotYetValid)?;
+    let sig = Signature::from_bytes(&sig_bytes);
+    let verifying_key = VerifyingKey::from_bytes(&issuer_pubkey)
+        .map_err(|_| Error::DelegationExpiredOrNotYetValid)?;
+    verifying_key
+        .verify(&message, &sig)
+        .map_err(|_| Error::DelegationExpiredOrNotYetValid)?;
+
+    if proof.iat > valid_at || valid_at >= proof.exp {
+        return Err(Error::DelegationExpiredOrNotYetValid);
+    }
+
+    let issuer_addr = principal_to_chain_address(&proof.issuer)?;
+    let audience_addr = principal_to_chain_address(&proof.audience)?;
+    let owner_addr = principal_to_chain_address(owner)?;
+    let signer_addr = principal_to_chain_address(&tx.signer)?;
+    if owner_addr != issuer_addr {
+        return Err(Error::DelegationIssuerOwnerMismatch);
+    }
+    if signer_addr != audience_addr {
+        return Err(Error::DelegationAudienceSignerMismatch);
+    }
+
+    // Scope: proof must be for this (owner, service_id, ability)
+    if proof.service_id != *service_id {
+        return Err(Error::DelegationScopeMismatch);
+    }
+    if let Some(ref ab) = proof.ability {
+        if ab.as_str() != ABILITY_CONSUME {
             return Err(Error::DelegationScopeMismatch);
         }
-        if let Some(ref ab) = proof.ability {
-            if ab.as_str() != ABILITY_CONSUME {
-                return Err(Error::DelegationScopeMismatch);
-            }
-        }
+    }
 
-        // Caveat limits: consumed + this_tx <= limit (per capability_id)
-        let cap_id = capability_id(proof_bytes);
-        if state.is_capability_revoked(&cap_id) {
-            return Err(Error::DelegationRevoked);
+    // Caveat limits: consumed + this_tx <= limit (per capability_id)
+    let cap_id = capability_id(proof_bytes);
+    if state.is_capability_revoked(&cap_id) {
+        return Err(Error::DelegationRevoked);
+    }
+    let (consumed_units, consumed_cost) = state.get_capability_consumption(&cap_id);
+    if let Some(limit) = proof.max_units {
+        if consumed_units.saturating_add(units) > limit {
+            return Err(Error::CapabilityLimitExceeded);
         }
-        let (consumed_units, consumed_cost) = state.get_capability_consumption(&cap_id);
-        if let Some(limit) = proof.max_units {
-            if consumed_units.saturating_add(units) > limit {
-                return Err(Error::CapabilityLimitExceeded);
-            }
+    }
+    if let Some(limit) = proof.max_cost {
+        if consumed_cost.saturating_add(cost) > limit {
+            return Err(Error::CapabilityLimitExceeded);
         }
-        if let Some(limit) = proof.max_cost {
-            if consumed_cost.saturating_add(cost) > limit {
-                return Err(Error::CapabilityLimitExceeded);
-            }
-        }
+    }
 
     let nonce_acc = state.get_account(nonce_account).ok_or_else(|| {
         Error::InvalidTransaction(format!("Account {} does not exist", nonce_account))
@@ -412,9 +412,9 @@ fn validate_consume_delegation(
             tx.nonce
         )));
     }
-    let balance_acc = state.get_account(owner).ok_or_else(|| {
-        Error::InvalidTransaction(format!("Account {} does not exist", owner))
-    })?;
+    let balance_acc = state
+        .get_account(owner)
+        .ok_or_else(|| Error::InvalidTransaction(format!("Account {} does not exist", owner)))?;
     if !balance_acc.has_sufficient_balance(cost) {
         return Err(Error::InvalidTransaction(format!(
             "Insufficient balance for consumption: have {}, need {}",
@@ -426,12 +426,7 @@ fn validate_consume_delegation(
 }
 
 /// Authorization Context: owner-signed Consume (signer == owner, nonce from signer, balance).
-fn validate_consume_owner(
-    state: &State,
-    tx: &SignedTx,
-    owner: &str,
-    cost: u64,
-) -> Result<()> {
+fn validate_consume_owner(state: &State, tx: &SignedTx, owner: &str, cost: u64) -> Result<()> {
     if tx.signer != *owner {
         return Err(Error::InvalidTransaction(format!(
             "Signer {} does not match owner {}",
