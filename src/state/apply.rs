@@ -220,12 +220,45 @@ fn apply_revoke_delegation(state: &mut State, capability_id: &str, signer: &str)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::Error;
+    use crate::state::hook::Hook;
     use crate::state::{Account, Meter};
     use crate::tx::validation::ValidationContext;
     use crate::tx::{Pricing, Transaction};
 
     fn replay_ctx() -> ValidationContext {
         ValidationContext::replay()
+    }
+
+    /// Hook that blocks before_consume (e.g. OutOfGas).
+    #[derive(Default)]
+    struct RejectConsumeHook;
+
+    impl Hook for RejectConsumeHook {
+        fn before_consume(
+            &mut self,
+            _owner: &str,
+            _service_id: &str,
+            _units: u64,
+            _cost: u64,
+        ) -> Result<()> {
+            Err(Error::StateError("blocked by before_consume".to_string()))
+        }
+    }
+
+    /// Hook that blocks before_meter_open.
+    #[derive(Default)]
+    struct RejectOpenMeterHook;
+
+    impl Hook for RejectOpenMeterHook {
+        fn before_meter_open(
+            &mut self,
+            _owner: &str,
+            _service_id: &str,
+            _deposit: u64,
+        ) -> Result<()> {
+            Err(Error::StateError("blocked by before_meter_open".to_string()))
+        }
     }
 
     fn create_authorized_minters() -> HashSet<String> {
@@ -464,5 +497,74 @@ mod tests {
         state = apply(&state, &tx4, &replay_ctx(), Some(&minters)).unwrap();
         assert_eq!(state.get_account("alice").unwrap().balance(), 950); // 850 + 100 deposit
         assert!(!state.get_meter("alice", "storage").unwrap().is_active());
+    }
+
+    #[test]
+    fn test_pre_hook_before_consume_blocks_execution() {
+        let mut state = State::new();
+        state
+            .accounts
+            .insert("alice".to_string(), Account::with_balance(1000));
+        state.insert_meter(Meter::new(
+            "alice".to_string(),
+            "storage".to_string(),
+            100,
+        ));
+        let minters = create_authorized_minters();
+
+        let tx = SignedTx::new(
+            "alice".to_string(),
+            0,
+            Transaction::Consume {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                units: 10,
+                pricing: Pricing::UnitPrice(5),
+            },
+        );
+
+        let mut sm = StateMachine::new(RejectConsumeHook);
+        let result = sm.apply(&state, &tx, &replay_ctx(), Some(&minters));
+        assert!(result.is_err());
+        match &result.unwrap_err() {
+            Error::StateError(msg) => assert!(msg.contains("before_consume")),
+            _ => panic!("expected StateError from pre-hook"),
+        }
+        // State must be unchanged
+        assert_eq!(state.get_account("alice").unwrap().balance(), 1000);
+        assert_eq!(
+            state.get_meter("alice", "storage").unwrap().total_units(),
+            0
+        );
+    }
+
+    #[test]
+    fn test_pre_hook_before_meter_open_blocks_execution() {
+        let mut state = State::new();
+        state
+            .accounts
+            .insert("alice".to_string(), Account::with_balance(1000));
+        let minters = create_authorized_minters();
+
+        let tx = SignedTx::new(
+            "alice".to_string(),
+            0,
+            Transaction::OpenMeter {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                deposit: 100,
+            },
+        );
+
+        let mut sm = StateMachine::new(RejectOpenMeterHook);
+        let result = sm.apply(&state, &tx, &replay_ctx(), Some(&minters));
+        assert!(result.is_err());
+        match &result.unwrap_err() {
+            Error::StateError(msg) => assert!(msg.contains("before_meter_open")),
+            _ => panic!("expected StateError from pre-hook"),
+        }
+        // State must be unchanged: no meter, balance intact
+        assert_eq!(state.get_account("alice").unwrap().balance(), 1000);
+        assert!(state.get_meter("alice", "storage").is_none());
     }
 }

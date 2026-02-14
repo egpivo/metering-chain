@@ -232,6 +232,89 @@ fn test_state_reconstruction() {
     );
 }
 
+/// Replay cursor consistency: next_tx_id semantics, snapshot + replay yields correct final cursor.
+#[test]
+fn test_replay_cursor_consistency() {
+    let (mut storage, _temp_dir) = create_test_storage();
+    let minters = get_authorized_minters();
+    let mut state = State::new();
+    let mut next_tx_id = 0u64;
+
+    // Append 4 txs to log
+    let tx1 = SignedTx::new(
+        "authority".to_string(),
+        0,
+        Transaction::Mint {
+            to: "alice".to_string(),
+            amount: 1000,
+        },
+    );
+    state = apply(&state, &tx1, &replay_ctx(), Some(&minters)).unwrap();
+    storage.append_tx(&tx1).unwrap();
+    next_tx_id += 1;
+
+    let tx2 = SignedTx::new(
+        "alice".to_string(),
+        0,
+        Transaction::OpenMeter {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            deposit: 100,
+        },
+    );
+    state = apply(&state, &tx2, &replay_ctx(), Some(&minters)).unwrap();
+    storage.append_tx(&tx2).unwrap();
+    next_tx_id += 1;
+
+    // Persist snapshot at cursor 2 (next tx to apply = 2)
+    let snapshot_at = next_tx_id;
+    storage.persist_state(&state, snapshot_at).unwrap();
+
+    // Append 2 more txs (not in snapshot)
+    let tx3 = SignedTx::new(
+        "alice".to_string(),
+        1,
+        Transaction::Consume {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            units: 10,
+            pricing: Pricing::UnitPrice(5),
+        },
+    );
+    state = apply(&state, &tx3, &replay_ctx(), Some(&minters)).unwrap();
+    storage.append_tx(&tx3).unwrap();
+    next_tx_id += 1;
+
+    let tx4 = SignedTx::new(
+        "alice".to_string(),
+        2,
+        Transaction::CloseMeter {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+        },
+    );
+    state = apply(&state, &tx4, &replay_ctx(), Some(&minters)).unwrap();
+    storage.append_tx(&tx4).unwrap();
+    next_tx_id += 1;
+
+    // Replay: snapshot (cursor 2) + txs from 2..4
+    let (replayed_state, replayed_next_tx_id) = load_or_replay_state(&storage);
+
+    // Cursor consistency: replayed_next_tx_id == total txs in log (4)
+    assert_eq!(
+        replayed_next_tx_id, next_tx_id,
+        "replay_to_tip must return next_tx_id = count of applied txs"
+    );
+    assert_eq!(replayed_next_tx_id, 4);
+
+    // load_txs_from(snapshot_at) returns remaining txs (tx3, tx4)
+    let remaining = replay::load_tx_slice(&storage, snapshot_at).unwrap();
+    assert_eq!(remaining.len(), 2, "load_txs_from(2) returns txs 2..4");
+
+    // Replayed state matches live state
+    assert_eq!(replayed_state, state);
+}
+
 /// Test meter reopening scenario
 #[test]
 fn test_meter_reopening() {
