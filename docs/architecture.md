@@ -28,9 +28,9 @@ pub trait Storage {
     // append-only
     fn append_tx(&mut self, tx: &SignedTx) -> Result<()>;
 
-    // snapshot (state + last applied tx id)
+    // snapshot (state + next tx id to apply)
     fn load_state(&self) -> Result<Option<(State, u64)>>;
-    fn persist_state(&mut self, state: &State, last_tx_id: u64) -> Result<()>;
+    fn persist_state(&mut self, state: &State, next_tx_id: u64) -> Result<()>;
 
     // replay
     fn load_txs_from(&self, from_tx_id: u64) -> Result<Vec<SignedTx>>;

@@ -1,63 +1,127 @@
 use crate::error::{Error, Result};
+use crate::state::hook::Hook;
 use crate::state::{MeterKey, State};
 use crate::tx::validation::{capability_id, validate, ValidationContext};
 use crate::tx::{SignedTx, Transaction};
 use std::collections::HashSet;
 
+/// State machine with injectable hook for metering/settlement interception.
+///
+/// Coordinates core state transitions and hook callbacks. Phase 4 Settlement
+/// can inject a SettlementHook to record consumption for settlement windows.
+pub struct StateMachine<M> {
+    hook: M,
+}
+
+impl<M: Hook> StateMachine<M> {
+    pub fn new(hook: M) -> Self {
+        StateMachine { hook }
+    }
+
+    /// Consume the StateMachine and return the hook (for settlement artifact extraction).
+    pub fn into_hook(self) -> M {
+        self.hook
+    }
+
+    /// Immutable access to the hook.
+    pub fn hook(&self) -> &M {
+        &self.hook
+    }
+
+    /// Mutable access to the hook.
+    pub fn hook_mut(&mut self) -> &mut M {
+        &mut self.hook
+    }
+
+    /// Apply a transaction. 1) Validate 2) Pre-hook (can block) 3) Core state transition 4) Post-hook.
+    pub fn apply(
+        &mut self,
+        state: &State,
+        tx: &SignedTx,
+        ctx: &ValidationContext,
+        authorized_minters: Option<&HashSet<String>>,
+    ) -> Result<State> {
+        let cost_opt = validate(state, tx, ctx, authorized_minters)?;
+        let mut new_state = state.clone();
+        match &tx.kind {
+            Transaction::Mint { to, amount } => {
+                apply_mint(&mut new_state, to, *amount)?;
+            }
+            Transaction::OpenMeter {
+                owner,
+                service_id,
+                deposit,
+            } => {
+                self.hook.before_meter_open(owner, service_id, *deposit)?;
+                apply_open_meter(&mut new_state, owner, service_id, *deposit, &tx.signer)?;
+                self.hook.on_meter_opened(owner, service_id, *deposit)?;
+            }
+            Transaction::Consume {
+                owner,
+                service_id,
+                units,
+                pricing: _,
+            } => {
+                let cost = cost_opt.expect("validate_consume should return cost");
+                self.hook.before_consume(owner, service_id, *units, cost)?;
+                let nonce_account = tx.nonce_account.as_deref().unwrap_or(&tx.signer);
+                apply_consume(
+                    &mut new_state,
+                    owner,
+                    service_id,
+                    *units,
+                    cost,
+                    nonce_account,
+                )?;
+                let cap_id_opt = if let Some(ref proof_bytes) = tx.delegation_proof {
+                    let cap_id = capability_id(proof_bytes);
+                    new_state.record_capability_consumption(cap_id.clone(), *units, cost);
+                    Some(cap_id)
+                } else {
+                    None
+                };
+                self.hook.on_consume_recorded(
+                    owner,
+                    service_id,
+                    *units,
+                    cost,
+                    cap_id_opt.as_deref(),
+                )?;
+            }
+            Transaction::CloseMeter { owner, service_id } => {
+                let deposit_returned = new_state
+                    .get_meter(owner, service_id)
+                    .map(|m| m.locked_deposit())
+                    .unwrap_or(0);
+                self.hook
+                    .before_meter_close(owner, service_id, deposit_returned)?;
+                apply_close_meter(&mut new_state, owner, service_id, &tx.signer)?;
+                self.hook
+                    .on_meter_closed(owner, service_id, deposit_returned)?;
+            }
+            Transaction::RevokeDelegation {
+                owner: _,
+                capability_id,
+            } => {
+                apply_revoke_delegation(&mut new_state, capability_id, &tx.signer)?;
+            }
+        }
+
+        Ok(new_state)
+    }
+}
+
 /// When authorized_minters is None (replay), mint authorization is skipped for deterministic replay.
 /// ctx must be ValidationContext::replay() when replaying from log; Live(now, max_age) when applying new tx.
+///
+/// Backward-compatible wrapper using StateMachine<NoOpHook>.
 pub fn apply(
     state: &State,
     tx: &SignedTx,
     ctx: &ValidationContext,
     authorized_minters: Option<&HashSet<String>>,
 ) -> Result<State> {
-    let cost_opt = validate(state, tx, ctx, authorized_minters)?;
-    let mut new_state = state.clone();
-    match &tx.kind {
-        Transaction::Mint { to, amount } => {
-            apply_mint(&mut new_state, to, *amount)?;
-        }
-        Transaction::OpenMeter {
-            owner,
-            service_id,
-            deposit,
-        } => {
-            apply_open_meter(&mut new_state, owner, service_id, *deposit, &tx.signer)?;
-        }
-        Transaction::Consume {
-            owner,
-            service_id,
-            units,
-            pricing: _,
-        } => {
-            let cost = cost_opt.expect("validate_consume should return cost");
-            let nonce_account = tx.nonce_account.as_deref().unwrap_or(&tx.signer);
-            apply_consume(
-                &mut new_state,
-                owner,
-                service_id,
-                *units,
-                cost,
-                nonce_account,
-            )?;
-            if let Some(ref proof_bytes) = tx.delegation_proof {
-                let cap_id = capability_id(proof_bytes);
-                new_state.record_capability_consumption(cap_id, *units, cost);
-            }
-        }
-        Transaction::CloseMeter { owner, service_id } => {
-            apply_close_meter(&mut new_state, owner, service_id, &tx.signer)?;
-        }
-        Transaction::RevokeDelegation {
-            owner: _,
-            capability_id,
-        } => {
-            apply_revoke_delegation(&mut new_state, capability_id, &tx.signer)?;
-        }
-    }
-
-    Ok(new_state)
+    StateMachine::new(crate::state::NoOpHook).apply(state, tx, ctx, authorized_minters)
 }
 
 fn apply_mint(state: &mut State, to: &str, amount: u64) -> Result<()> {
@@ -158,12 +222,47 @@ fn apply_revoke_delegation(state: &mut State, capability_id: &str, signer: &str)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::Error;
+    use crate::state::hook::Hook;
     use crate::state::{Account, Meter};
     use crate::tx::validation::ValidationContext;
     use crate::tx::{Pricing, Transaction};
 
     fn replay_ctx() -> ValidationContext {
         ValidationContext::replay()
+    }
+
+    /// Hook that blocks before_consume (e.g. OutOfGas).
+    #[derive(Default)]
+    struct RejectConsumeHook;
+
+    impl Hook for RejectConsumeHook {
+        fn before_consume(
+            &mut self,
+            _owner: &str,
+            _service_id: &str,
+            _units: u64,
+            _cost: u64,
+        ) -> Result<()> {
+            Err(Error::StateError("blocked by before_consume".to_string()))
+        }
+    }
+
+    /// Hook that blocks before_meter_open.
+    #[derive(Default)]
+    struct RejectOpenMeterHook;
+
+    impl Hook for RejectOpenMeterHook {
+        fn before_meter_open(
+            &mut self,
+            _owner: &str,
+            _service_id: &str,
+            _deposit: u64,
+        ) -> Result<()> {
+            Err(Error::StateError(
+                "blocked by before_meter_open".to_string(),
+            ))
+        }
     }
 
     fn create_authorized_minters() -> HashSet<String> {
@@ -402,5 +501,70 @@ mod tests {
         state = apply(&state, &tx4, &replay_ctx(), Some(&minters)).unwrap();
         assert_eq!(state.get_account("alice").unwrap().balance(), 950); // 850 + 100 deposit
         assert!(!state.get_meter("alice", "storage").unwrap().is_active());
+    }
+
+    #[test]
+    fn test_pre_hook_before_consume_blocks_execution() {
+        let mut state = State::new();
+        state
+            .accounts
+            .insert("alice".to_string(), Account::with_balance(1000));
+        state.insert_meter(Meter::new("alice".to_string(), "storage".to_string(), 100));
+        let minters = create_authorized_minters();
+
+        let tx = SignedTx::new(
+            "alice".to_string(),
+            0,
+            Transaction::Consume {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                units: 10,
+                pricing: Pricing::UnitPrice(5),
+            },
+        );
+
+        let mut sm = StateMachine::new(RejectConsumeHook);
+        let result = sm.apply(&state, &tx, &replay_ctx(), Some(&minters));
+        assert!(result.is_err());
+        match &result.unwrap_err() {
+            Error::StateError(msg) => assert!(msg.contains("before_consume")),
+            _ => panic!("expected StateError from pre-hook"),
+        }
+        // State must be unchanged
+        assert_eq!(state.get_account("alice").unwrap().balance(), 1000);
+        assert_eq!(
+            state.get_meter("alice", "storage").unwrap().total_units(),
+            0
+        );
+    }
+
+    #[test]
+    fn test_pre_hook_before_meter_open_blocks_execution() {
+        let mut state = State::new();
+        state
+            .accounts
+            .insert("alice".to_string(), Account::with_balance(1000));
+        let minters = create_authorized_minters();
+
+        let tx = SignedTx::new(
+            "alice".to_string(),
+            0,
+            Transaction::OpenMeter {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                deposit: 100,
+            },
+        );
+
+        let mut sm = StateMachine::new(RejectOpenMeterHook);
+        let result = sm.apply(&state, &tx, &replay_ctx(), Some(&minters));
+        assert!(result.is_err());
+        match &result.unwrap_err() {
+            Error::StateError(msg) => assert!(msg.contains("before_meter_open")),
+            _ => panic!("expected StateError from pre-hook"),
+        }
+        // State must be unchanged: no meter, balance intact
+        assert_eq!(state.get_account("alice").unwrap().balance(), 1000);
+        assert!(state.get_meter("alice", "storage").is_none());
     }
 }

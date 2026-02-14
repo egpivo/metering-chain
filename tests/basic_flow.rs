@@ -1,4 +1,5 @@
 use metering_chain::error::Error;
+use metering_chain::replay;
 use metering_chain::state::{apply, Account, Meter, State};
 use metering_chain::storage::{FileStorage, Storage};
 use metering_chain::tx::validation::ValidationContext;
@@ -26,28 +27,7 @@ fn create_test_storage() -> (FileStorage, TempDir) {
 }
 
 fn load_or_replay_state(storage: &FileStorage) -> (State, u64) {
-    match storage.load_state().unwrap() {
-        Some((snapshot_state, snapshot_tx_id)) => {
-            let txs_after_snapshot = storage.load_txs_from(snapshot_tx_id).unwrap();
-            let mut current_state = snapshot_state;
-            let mut current_tx_id = snapshot_tx_id;
-            for tx in txs_after_snapshot {
-                current_state = apply(&current_state, &tx, &replay_ctx(), None).unwrap();
-                current_tx_id += 1;
-            }
-            (current_state, current_tx_id)
-        }
-        None => {
-            let all_txs = storage.load_txs_from(0).unwrap();
-            let mut current_state = State::new();
-            let mut current_tx_id = 0u64;
-            for tx in all_txs {
-                current_state = apply(&current_state, &tx, &replay_ctx(), None).unwrap();
-                current_tx_id += 1;
-            }
-            (current_state, current_tx_id)
-        }
-    }
+    replay::replay_to_tip(storage).unwrap()
 }
 
 /// Test the complete happy path: Mint, OpenMeter, Consume, CloseMeter
@@ -56,7 +36,7 @@ fn test_happy_path_end_to_end() {
     let (mut storage, _temp_dir) = create_test_storage();
     let minters = get_authorized_minters();
     let mut state = State::new();
-    let mut tx_id = 0u64;
+    let mut next_tx_id = 0u64;
 
     // 1. Mint: Authority mints 1000 to alice
     let tx1 = SignedTx::new(
@@ -69,8 +49,8 @@ fn test_happy_path_end_to_end() {
     );
     state = apply(&state, &tx1, &replay_ctx(), Some(&minters)).unwrap();
     storage.append_tx(&tx1).unwrap();
-    tx_id += 1;
-    storage.persist_state(&state, tx_id).unwrap();
+    next_tx_id += 1;
+    storage.persist_state(&state, next_tx_id).unwrap();
 
     // Verify: alice has 1000 balance
     assert_eq!(state.get_account("alice").unwrap().balance(), 1000);
@@ -88,8 +68,8 @@ fn test_happy_path_end_to_end() {
     );
     state = apply(&state, &tx2, &replay_ctx(), Some(&minters)).unwrap();
     storage.append_tx(&tx2).unwrap();
-    tx_id += 1;
-    storage.persist_state(&state, tx_id).unwrap();
+    next_tx_id += 1;
+    storage.persist_state(&state, next_tx_id).unwrap();
 
     // Verify: alice balance decreased, meter created
     assert_eq!(state.get_account("alice").unwrap().balance(), 900);
@@ -113,8 +93,8 @@ fn test_happy_path_end_to_end() {
     );
     state = apply(&state, &tx3, &replay_ctx(), Some(&minters)).unwrap();
     storage.append_tx(&tx3).unwrap();
-    tx_id += 1;
-    storage.persist_state(&state, tx_id).unwrap();
+    next_tx_id += 1;
+    storage.persist_state(&state, next_tx_id).unwrap();
 
     // Verify: balance decreased, meter totals updated
     assert_eq!(state.get_account("alice").unwrap().balance(), 850);
@@ -136,8 +116,8 @@ fn test_happy_path_end_to_end() {
     );
     state = apply(&state, &tx4, &replay_ctx(), Some(&minters)).unwrap();
     storage.append_tx(&tx4).unwrap();
-    tx_id += 1;
-    storage.persist_state(&state, tx_id).unwrap();
+    next_tx_id += 1;
+    storage.persist_state(&state, next_tx_id).unwrap();
 
     // Verify: cumulative totals
     assert_eq!(state.get_account("alice").unwrap().balance(), 825);
@@ -156,8 +136,8 @@ fn test_happy_path_end_to_end() {
     );
     state = apply(&state, &tx5, &replay_ctx(), Some(&minters)).unwrap();
     storage.append_tx(&tx5).unwrap();
-    tx_id += 1;
-    storage.persist_state(&state, tx_id).unwrap();
+    next_tx_id += 1;
+    storage.persist_state(&state, next_tx_id).unwrap();
 
     // Verify: deposit returned, meter inactive
     assert_eq!(state.get_account("alice").unwrap().balance(), 925); // 825 + 100 deposit
@@ -176,7 +156,7 @@ fn test_state_reconstruction() {
     let (mut storage, _temp_dir) = create_test_storage();
     let minters = get_authorized_minters();
     let mut state = State::new();
-    let mut tx_id = 0u64;
+    let mut next_tx_id = 0u64;
 
     // Apply transactions without persisting state (simulating crash)
     let tx1 = SignedTx::new(
@@ -189,7 +169,7 @@ fn test_state_reconstruction() {
     );
     state = apply(&state, &tx1, &replay_ctx(), Some(&minters)).unwrap();
     storage.append_tx(&tx1).unwrap();
-    tx_id += 1;
+    next_tx_id += 1;
 
     let tx2 = SignedTx::new(
         "alice".to_string(),
@@ -202,11 +182,11 @@ fn test_state_reconstruction() {
     );
     state = apply(&state, &tx2, &replay_ctx(), Some(&minters)).unwrap();
     storage.append_tx(&tx2).unwrap();
-    tx_id += 1;
+    next_tx_id += 1;
 
     // Persist state after tx2
-    let snapshot_tx_id = tx_id;
-    storage.persist_state(&state, snapshot_tx_id).unwrap();
+    let snapshot_next_tx_id = next_tx_id;
+    storage.persist_state(&state, snapshot_next_tx_id).unwrap();
 
     // Apply more transactions (not persisted in snapshot)
     let tx3 = SignedTx::new(
@@ -221,16 +201,16 @@ fn test_state_reconstruction() {
     );
     state = apply(&state, &tx3, &replay_ctx(), Some(&minters)).unwrap();
     storage.append_tx(&tx3).unwrap();
-    tx_id += 1;
+    next_tx_id += 1;
 
     // Reconstruct state from snapshot + replay
-    let (reconstructed_state, reconstructed_tx_id) = load_or_replay_state(&storage);
+    let (reconstructed_state, reconstructed_next_tx_id) = load_or_replay_state(&storage);
 
     // Verify reconstructed state matches current state
-    // reconstructed_tx_id should be tx_id (snapshot at 2 + replay tx3 = 3)
+    // reconstructed_next_tx_id should be next_tx_id (snapshot at 2 + replay tx3 = 3)
     assert_eq!(
-        reconstructed_tx_id, tx_id,
-        "Reconstructed tx_id should match current tx_id"
+        reconstructed_next_tx_id, next_tx_id,
+        "Reconstructed next_tx_id should match current next_tx_id"
     );
     assert_eq!(
         reconstructed_state.get_account("alice").unwrap().balance(),
@@ -250,6 +230,89 @@ fn test_state_reconstruction() {
         reconstructed_meter.total_spent(),
         current_meter.total_spent()
     );
+}
+
+/// Replay cursor consistency: next_tx_id semantics, snapshot + replay yields correct final cursor.
+#[test]
+fn test_replay_cursor_consistency() {
+    let (mut storage, _temp_dir) = create_test_storage();
+    let minters = get_authorized_minters();
+    let mut state = State::new();
+    let mut next_tx_id = 0u64;
+
+    // Append 4 txs to log
+    let tx1 = SignedTx::new(
+        "authority".to_string(),
+        0,
+        Transaction::Mint {
+            to: "alice".to_string(),
+            amount: 1000,
+        },
+    );
+    state = apply(&state, &tx1, &replay_ctx(), Some(&minters)).unwrap();
+    storage.append_tx(&tx1).unwrap();
+    next_tx_id += 1;
+
+    let tx2 = SignedTx::new(
+        "alice".to_string(),
+        0,
+        Transaction::OpenMeter {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            deposit: 100,
+        },
+    );
+    state = apply(&state, &tx2, &replay_ctx(), Some(&minters)).unwrap();
+    storage.append_tx(&tx2).unwrap();
+    next_tx_id += 1;
+
+    // Persist snapshot at cursor 2 (next tx to apply = 2)
+    let snapshot_at = next_tx_id;
+    storage.persist_state(&state, snapshot_at).unwrap();
+
+    // Append 2 more txs (not in snapshot)
+    let tx3 = SignedTx::new(
+        "alice".to_string(),
+        1,
+        Transaction::Consume {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            units: 10,
+            pricing: Pricing::UnitPrice(5),
+        },
+    );
+    state = apply(&state, &tx3, &replay_ctx(), Some(&minters)).unwrap();
+    storage.append_tx(&tx3).unwrap();
+    next_tx_id += 1;
+
+    let tx4 = SignedTx::new(
+        "alice".to_string(),
+        2,
+        Transaction::CloseMeter {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+        },
+    );
+    state = apply(&state, &tx4, &replay_ctx(), Some(&minters)).unwrap();
+    storage.append_tx(&tx4).unwrap();
+    next_tx_id += 1;
+
+    // Replay: snapshot (cursor 2) + txs from 2..4
+    let (replayed_state, replayed_next_tx_id) = load_or_replay_state(&storage);
+
+    // Cursor consistency: replayed_next_tx_id == total txs in log (4)
+    assert_eq!(
+        replayed_next_tx_id, next_tx_id,
+        "replay_to_tip must return next_tx_id = count of applied txs"
+    );
+    assert_eq!(replayed_next_tx_id, 4);
+
+    // load_txs_from(snapshot_at) returns remaining txs (tx3, tx4)
+    let remaining = replay::load_tx_slice(&storage, snapshot_at).unwrap();
+    assert_eq!(remaining.len(), 2, "load_txs_from(2) returns txs 2..4");
+
+    // Replayed state matches live state
+    assert_eq!(replayed_state, state);
 }
 
 /// Test meter reopening scenario
@@ -1988,4 +2051,89 @@ fn test_phase3_revocation_rejected_consume() {
         Error::DelegationRevoked => {}
         e => panic!("expected DelegationRevoked, got {:?}", e),
     }
+}
+
+// --- Pre-Phase 4 refactoring regression baseline ---
+
+/// Pre-Phase 4: determinism and invariant regression baseline.
+/// Replays same tx log twice and asserts identical state. Documents extension points for Phase 4.
+#[test]
+fn test_pre_phase4_replay_determinism_baseline() {
+    let minters = get_authorized_minters();
+
+    let txs = vec![
+        SignedTx::new(
+            "authority".to_string(),
+            0,
+            Transaction::Mint {
+                to: "alice".to_string(),
+                amount: 1000,
+            },
+        ),
+        SignedTx::new(
+            "alice".to_string(),
+            0,
+            Transaction::OpenMeter {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                deposit: 100,
+            },
+        ),
+        SignedTx::new(
+            "alice".to_string(),
+            1,
+            Transaction::Consume {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                units: 10,
+                pricing: Pricing::UnitPrice(5),
+            },
+        ),
+    ];
+
+    let rctx = replay_ctx();
+    let mut state_a = State::new();
+    for tx in &txs {
+        state_a = apply(
+            &state_a,
+            tx,
+            &rctx,
+            if matches!(tx.kind, Transaction::Mint { .. }) {
+                Some(&minters)
+            } else {
+                None
+            },
+        )
+        .unwrap();
+    }
+
+    let mut state_b = State::new();
+    for tx in &txs {
+        state_b = apply(
+            &state_b,
+            tx,
+            &rctx,
+            if matches!(tx.kind, Transaction::Mint { .. }) {
+                Some(&minters)
+            } else {
+                None
+            },
+        )
+        .unwrap();
+    }
+
+    assert_eq!(
+        state_a, state_b,
+        "Pre-Phase 4: same tx log replayed twice must yield identical state"
+    );
+}
+
+/// Pre-Phase 4: error_code() returns deterministic codes for UI mapping.
+#[test]
+fn test_pre_phase4_error_code_deterministic() {
+    assert_eq!(Error::DelegationRevoked.error_code(), "DELEGATION_REVOKED");
+    assert_eq!(
+        Error::DelegatedConsumeRequiresV2.error_code(),
+        "DELEGATED_CONSUME_REQUIRES_V2"
+    );
 }

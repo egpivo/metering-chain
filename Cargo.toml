@@ -22,3 +22,7 @@ tempfile = "3.8"
 [[bin]]
 name = "sim-activity-to-consume"
 path = "examples/depin/sim_activity_to_consume.rs"
+
+[[example]]
+name = "hook_demo"
+path = "examples/hook_demo.rs"
