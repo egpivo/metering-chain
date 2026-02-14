@@ -7,9 +7,35 @@ use crate::error::Result;
 
 /// Trait-based hook for execution interception during apply.
 ///
-/// Each callback is invoked at the corresponding stage. Default impls are no-op.
-/// Phase 4 SettlementHook implements these to record usage for settlement windows.
+/// Pre-hooks can block execution (e.g. OutOfGas before write). Post-hooks are for recording.
+/// Phase 4 SettlementHook implements these for settlement windows.
 pub trait Hook {
+    /// Called before Consume is applied. Return Err to block (e.g. OutOfGas).
+    fn before_consume(
+        &mut self,
+        _owner: &str,
+        _service_id: &str,
+        _units: u64,
+        _cost: u64,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// Called before meter is opened. Return Err to block.
+    fn before_meter_open(&mut self, _owner: &str, _service_id: &str, _deposit: u64) -> Result<()> {
+        Ok(())
+    }
+
+    /// Called before meter is closed. Return Err to block.
+    fn before_meter_close(
+        &mut self,
+        _owner: &str,
+        _service_id: &str,
+        _deposit_returned: u64,
+    ) -> Result<()> {
+        Ok(())
+    }
+
     /// Called after a Consume is recorded in state.
     fn on_consume_recorded(
         &mut self,

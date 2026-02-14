@@ -11,38 +11,38 @@ use crate::wallet;
 
 /// Replay transaction log from storage to current tip.
 ///
-/// - If a snapshot exists: load it, then replay txs from `snapshot_tx_id` (next tx to apply; 0-indexed).
-/// - If no snapshot: replay from genesis (tx_id 0).
+/// - If a snapshot exists: load it, then replay txs from `next_tx_id` (0-indexed position of next tx).
+/// - If no snapshot: replay from genesis (position 0).
 /// - Uses `ValidationContext::replay()` and `None` for minters (replay mode).
 /// - Verifies signatures for signed txs to ensure log integrity.
 pub fn replay_to_tip<S: Storage>(storage: &S) -> Result<(State, u64)> {
     let replay_ctx = ValidationContext::replay();
     match storage.load_state()? {
-        Some((snapshot_state, snapshot_tx_id)) => {
-            let txs_after_snapshot = storage.load_txs_from(snapshot_tx_id)?;
+        Some((snapshot_state, next_tx_id)) => {
+            let txs_to_apply = storage.load_txs_from(next_tx_id)?;
             let mut current_state = snapshot_state;
-            let mut current_tx_id = snapshot_tx_id;
-            for tx in txs_after_snapshot {
+            let mut next_id = next_tx_id;
+            for tx in txs_to_apply {
                 if tx.signature.is_some() {
                     wallet::verify_signature(&tx)?;
                 }
                 current_state = apply(&current_state, &tx, &replay_ctx, None)?;
-                current_tx_id += 1;
+                next_id += 1;
             }
-            Ok((current_state, current_tx_id))
+            Ok((current_state, next_id))
         }
         None => {
             let all_txs = storage.load_txs_from(0)?;
             let mut current_state = State::new();
-            let mut current_tx_id = 0u64;
+            let mut next_id = 0u64;
             for tx in all_txs {
                 if tx.signature.is_some() {
                     wallet::verify_signature(&tx)?;
                 }
                 current_state = apply(&current_state, &tx, &replay_ctx, None)?;
-                current_tx_id += 1;
+                next_id += 1;
             }
-            Ok((current_state, current_tx_id))
+            Ok((current_state, next_id))
         }
     }
 }

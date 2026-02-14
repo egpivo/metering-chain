@@ -12,7 +12,7 @@ use std::path::PathBuf;
 ///
 /// Files:
 /// - `tx.log`: Append-only transaction log (bincode serialized)
-/// - `state.bin`: State snapshot (bincode serialized State + u64 last_tx_id)
+/// - `state.bin`: State snapshot (bincode serialized State + u64 next_tx_id)
 /// - `state.bin.tmp`: Temporary file for atomic snapshot writes
 pub struct FileStorage {
     tx_log_path: PathBuf,
@@ -91,26 +91,26 @@ impl Storage for FileStorage {
             return Err(Error::StateError("State file too short".to_string()));
         }
 
-        let last_tx_id_bytes = &data[data.len() - 8..];
-        let last_tx_id = u64::from_le_bytes([
-            last_tx_id_bytes[0],
-            last_tx_id_bytes[1],
-            last_tx_id_bytes[2],
-            last_tx_id_bytes[3],
-            last_tx_id_bytes[4],
-            last_tx_id_bytes[5],
-            last_tx_id_bytes[6],
-            last_tx_id_bytes[7],
+        let next_tx_id_bytes = &data[data.len() - 8..];
+        let next_tx_id = u64::from_le_bytes([
+            next_tx_id_bytes[0],
+            next_tx_id_bytes[1],
+            next_tx_id_bytes[2],
+            next_tx_id_bytes[3],
+            next_tx_id_bytes[4],
+            next_tx_id_bytes[5],
+            next_tx_id_bytes[6],
+            next_tx_id_bytes[7],
         ]);
 
         let state_bytes = &data[..data.len() - 8];
         let state: State = bincode::deserialize(state_bytes)
             .map_err(|e| Error::StateError(format!("Failed to deserialize state: {}", e)))?;
 
-        Ok(Some((state, last_tx_id)))
+        Ok(Some((state, next_tx_id)))
     }
 
-    fn persist_state(&mut self, state: &State, last_tx_id: u64) -> Result<()> {
+    fn persist_state(&mut self, state: &State, next_tx_id: u64) -> Result<()> {
         self.ensure_dir()?;
 
         let state_bytes = bincode::serialize(state)
@@ -121,8 +121,8 @@ impl Storage for FileStorage {
 
         file.write_all(&state_bytes)
             .map_err(|e| Error::StateError(format!("Failed to write state: {}", e)))?;
-        file.write_all(&last_tx_id.to_le_bytes())
-            .map_err(|e| Error::StateError(format!("Failed to write last_tx_id: {}", e)))?;
+        file.write_all(&next_tx_id.to_le_bytes())
+            .map_err(|e| Error::StateError(format!("Failed to write next_tx_id: {}", e)))?;
 
         file.sync_all()
             .map_err(|e| Error::StateError(format!("Failed to fsync temp state file: {}", e)))?;
@@ -255,8 +255,8 @@ mod tests {
 
         let loaded = storage.load_state().unwrap();
         assert!(loaded.is_some());
-        let (loaded_state, last_tx_id) = loaded.unwrap();
-        assert_eq!(last_tx_id, 5);
+        let (loaded_state, next_tx_id) = loaded.unwrap();
+        assert_eq!(next_tx_id, 5);
         assert_eq!(loaded_state.accounts.len(), 1);
         assert_eq!(loaded_state.get_account("alice").unwrap().balance(), 1000);
     }

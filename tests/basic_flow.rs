@@ -36,7 +36,7 @@ fn test_happy_path_end_to_end() {
     let (mut storage, _temp_dir) = create_test_storage();
     let minters = get_authorized_minters();
     let mut state = State::new();
-    let mut tx_id = 0u64;
+    let mut next_tx_id = 0u64;
 
     // 1. Mint: Authority mints 1000 to alice
     let tx1 = SignedTx::new(
@@ -49,8 +49,8 @@ fn test_happy_path_end_to_end() {
     );
     state = apply(&state, &tx1, &replay_ctx(), Some(&minters)).unwrap();
     storage.append_tx(&tx1).unwrap();
-    tx_id += 1;
-    storage.persist_state(&state, tx_id).unwrap();
+    next_tx_id += 1;
+    storage.persist_state(&state, next_tx_id).unwrap();
 
     // Verify: alice has 1000 balance
     assert_eq!(state.get_account("alice").unwrap().balance(), 1000);
@@ -68,8 +68,8 @@ fn test_happy_path_end_to_end() {
     );
     state = apply(&state, &tx2, &replay_ctx(), Some(&minters)).unwrap();
     storage.append_tx(&tx2).unwrap();
-    tx_id += 1;
-    storage.persist_state(&state, tx_id).unwrap();
+    next_tx_id += 1;
+    storage.persist_state(&state, next_tx_id).unwrap();
 
     // Verify: alice balance decreased, meter created
     assert_eq!(state.get_account("alice").unwrap().balance(), 900);
@@ -93,8 +93,8 @@ fn test_happy_path_end_to_end() {
     );
     state = apply(&state, &tx3, &replay_ctx(), Some(&minters)).unwrap();
     storage.append_tx(&tx3).unwrap();
-    tx_id += 1;
-    storage.persist_state(&state, tx_id).unwrap();
+    next_tx_id += 1;
+    storage.persist_state(&state, next_tx_id).unwrap();
 
     // Verify: balance decreased, meter totals updated
     assert_eq!(state.get_account("alice").unwrap().balance(), 850);
@@ -116,8 +116,8 @@ fn test_happy_path_end_to_end() {
     );
     state = apply(&state, &tx4, &replay_ctx(), Some(&minters)).unwrap();
     storage.append_tx(&tx4).unwrap();
-    tx_id += 1;
-    storage.persist_state(&state, tx_id).unwrap();
+    next_tx_id += 1;
+    storage.persist_state(&state, next_tx_id).unwrap();
 
     // Verify: cumulative totals
     assert_eq!(state.get_account("alice").unwrap().balance(), 825);
@@ -136,8 +136,8 @@ fn test_happy_path_end_to_end() {
     );
     state = apply(&state, &tx5, &replay_ctx(), Some(&minters)).unwrap();
     storage.append_tx(&tx5).unwrap();
-    tx_id += 1;
-    storage.persist_state(&state, tx_id).unwrap();
+    next_tx_id += 1;
+    storage.persist_state(&state, next_tx_id).unwrap();
 
     // Verify: deposit returned, meter inactive
     assert_eq!(state.get_account("alice").unwrap().balance(), 925); // 825 + 100 deposit
@@ -156,7 +156,7 @@ fn test_state_reconstruction() {
     let (mut storage, _temp_dir) = create_test_storage();
     let minters = get_authorized_minters();
     let mut state = State::new();
-    let mut tx_id = 0u64;
+    let mut next_tx_id = 0u64;
 
     // Apply transactions without persisting state (simulating crash)
     let tx1 = SignedTx::new(
@@ -169,7 +169,7 @@ fn test_state_reconstruction() {
     );
     state = apply(&state, &tx1, &replay_ctx(), Some(&minters)).unwrap();
     storage.append_tx(&tx1).unwrap();
-    tx_id += 1;
+    next_tx_id += 1;
 
     let tx2 = SignedTx::new(
         "alice".to_string(),
@@ -182,11 +182,11 @@ fn test_state_reconstruction() {
     );
     state = apply(&state, &tx2, &replay_ctx(), Some(&minters)).unwrap();
     storage.append_tx(&tx2).unwrap();
-    tx_id += 1;
+    next_tx_id += 1;
 
     // Persist state after tx2
-    let snapshot_tx_id = tx_id;
-    storage.persist_state(&state, snapshot_tx_id).unwrap();
+    let snapshot_next_tx_id = next_tx_id;
+    storage.persist_state(&state, snapshot_next_tx_id).unwrap();
 
     // Apply more transactions (not persisted in snapshot)
     let tx3 = SignedTx::new(
@@ -201,16 +201,16 @@ fn test_state_reconstruction() {
     );
     state = apply(&state, &tx3, &replay_ctx(), Some(&minters)).unwrap();
     storage.append_tx(&tx3).unwrap();
-    tx_id += 1;
+    next_tx_id += 1;
 
     // Reconstruct state from snapshot + replay
-    let (reconstructed_state, reconstructed_tx_id) = load_or_replay_state(&storage);
+    let (reconstructed_state, reconstructed_next_tx_id) = load_or_replay_state(&storage);
 
     // Verify reconstructed state matches current state
-    // reconstructed_tx_id should be tx_id (snapshot at 2 + replay tx3 = 3)
+    // reconstructed_next_tx_id should be next_tx_id (snapshot at 2 + replay tx3 = 3)
     assert_eq!(
-        reconstructed_tx_id, tx_id,
-        "Reconstructed tx_id should match current tx_id"
+        reconstructed_next_tx_id, next_tx_id,
+        "Reconstructed next_tx_id should match current next_tx_id"
     );
     assert_eq!(
         reconstructed_state.get_account("alice").unwrap().balance(),

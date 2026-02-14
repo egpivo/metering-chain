@@ -269,7 +269,7 @@ pub fn run(cli: Cli) -> Result<()> {
             allow_unsigned,
         } => {
             // Load current state
-            let (mut state, mut last_tx_id) = load_or_create_state(&storage, &config)?;
+            let (mut state, mut next_tx_id) = load_or_create_state(&storage, &config)?;
 
             // Read transaction
             let tx_json = match tx {
@@ -312,11 +312,11 @@ pub fn run(cli: Cli) -> Result<()> {
 
             // Apply transaction
             state = apply(&state, &signed_tx, &live_ctx, Some(&minters))?;
-            last_tx_id += 1;
+            next_tx_id += 1;
 
             // Persist transaction and state
             storage.append_tx(&signed_tx)?;
-            storage.persist_state(&state, last_tx_id)?;
+            storage.persist_state(&state, next_tx_id)?;
 
             println!("Transaction applied successfully");
             if let Some(cost) = cost_opt {

@@ -18,7 +18,22 @@ impl<M: Hook> StateMachine<M> {
         StateMachine { hook }
     }
 
-    /// Apply a transaction. 1) Validate 2) Core state transition 3) Hook callback (e.g. on Consume).
+    /// Consume the StateMachine and return the hook (for settlement artifact extraction).
+    pub fn into_hook(self) -> M {
+        self.hook
+    }
+
+    /// Immutable access to the hook.
+    pub fn hook(&self) -> &M {
+        &self.hook
+    }
+
+    /// Mutable access to the hook.
+    pub fn hook_mut(&mut self) -> &mut M {
+        &mut self.hook
+    }
+
+    /// Apply a transaction. 1) Validate 2) Pre-hook (can block) 3) Core state transition 4) Post-hook.
     pub fn apply(
         &mut self,
         state: &State,
@@ -37,6 +52,7 @@ impl<M: Hook> StateMachine<M> {
                 service_id,
                 deposit,
             } => {
+                self.hook.before_meter_open(owner, service_id, *deposit)?;
                 apply_open_meter(&mut new_state, owner, service_id, *deposit, &tx.signer)?;
                 self.hook.on_meter_opened(owner, service_id, *deposit)?;
             }
@@ -47,6 +63,7 @@ impl<M: Hook> StateMachine<M> {
                 pricing: _,
             } => {
                 let cost = cost_opt.expect("validate_consume should return cost");
+                self.hook.before_consume(owner, service_id, *units, cost)?;
                 let nonce_account = tx.nonce_account.as_deref().unwrap_or(&tx.signer);
                 apply_consume(
                     &mut new_state,
@@ -76,6 +93,7 @@ impl<M: Hook> StateMachine<M> {
                     .get_meter(owner, service_id)
                     .map(|m| m.locked_deposit())
                     .unwrap_or(0);
+                self.hook.before_meter_close(owner, service_id, deposit_returned)?;
                 apply_close_meter(&mut new_state, owner, service_id, &tx.signer)?;
                 self.hook.on_meter_closed(owner, service_id, deposit_returned)?;
             }
