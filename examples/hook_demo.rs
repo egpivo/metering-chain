@@ -2,7 +2,7 @@
 //!
 //! Run: cargo run --example hook_demo
 
-use metering_chain::state::{apply, ApplyHook, State, StateMachine};
+use metering_chain::state::{apply, Hook, State, StateMachine};
 use metering_chain::tx::validation::ValidationContext;
 use metering_chain::tx::{Pricing, SignedTx, Transaction};
 use std::collections::HashSet;
@@ -10,7 +10,7 @@ use std::collections::HashSet;
 /// Example hook that logs consumption (Phase 4: replace with settlement recording).
 struct LoggingHook;
 
-impl ApplyHook for LoggingHook {
+impl Hook for LoggingHook {
     fn on_consume_recorded(
         &mut self,
         owner: &str,
@@ -22,6 +22,32 @@ impl ApplyHook for LoggingHook {
         eprintln!(
             "[Hook] Consume recorded: owner={} service={} units={} cost={} cap_id={:?}",
             owner, service_id, units, cost, cap_id
+        );
+        Ok(())
+    }
+
+    fn on_meter_opened(
+        &mut self,
+        owner: &str,
+        service_id: &str,
+        deposit: u64,
+    ) -> metering_chain::error::Result<()> {
+        eprintln!(
+            "[Hook] Meter opened: owner={} service={} deposit={}",
+            owner, service_id, deposit
+        );
+        Ok(())
+    }
+
+    fn on_meter_closed(
+        &mut self,
+        owner: &str,
+        service_id: &str,
+        deposit_returned: u64,
+    ) -> metering_chain::error::Result<()> {
+        eprintln!(
+            "[Hook] Meter closed: owner={} service={} deposit_returned={}",
+            owner, service_id, deposit_returned
         );
         Ok(())
     }
@@ -45,7 +71,8 @@ fn main() -> metering_chain::error::Result<()> {
     );
     state = apply(&state, &tx1, &ctx, Some(&minters))?;
 
-    // Open meter
+    // Open meter with StateMachine<LoggingHook> — hook will log
+    let mut sm = StateMachine::new(LoggingHook);
     let tx2 = SignedTx::new(
         "alice".to_string(),
         0,
@@ -55,10 +82,9 @@ fn main() -> metering_chain::error::Result<()> {
             deposit: 100,
         },
     );
-    state = apply(&state, &tx2, &ctx, Some(&minters))?;
+    state = sm.apply(&state, &tx2, &ctx, Some(&minters))?;
 
-    // Consume with StateMachine<LoggingHook> — hook will log
-    let mut sm = StateMachine::new(LoggingHook);
+    // Consume
     let tx3 = SignedTx::new(
         "alice".to_string(),
         1,
@@ -70,6 +96,17 @@ fn main() -> metering_chain::error::Result<()> {
         },
     );
     state = sm.apply(&state, &tx3, &ctx, Some(&minters))?;
+
+    // Close meter (hook logs on_meter_closed)
+    let tx4 = SignedTx::new(
+        "alice".to_string(),
+        2,
+        Transaction::CloseMeter {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+        },
+    );
+    state = sm.apply(&state, &tx4, &ctx, Some(&minters))?;
 
     println!("Balance: {}", state.get_account("alice").unwrap().balance());
     Ok(())

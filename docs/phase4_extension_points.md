@@ -4,10 +4,13 @@ Documented extension points for Settlement and Dispute contexts after Pre-Phase 
 
 ## Hook Pattern (WS-R1)
 
-- **ApplyHook** trait (`src/state/hook.rs`): injectable strategy for metering/settlement interception
-- **StateMachine&lt;M: ApplyHook&gt;** (`src/state/apply.rs`): coordinates hook and core state transitions
+- **Hook** trait (`src/state/hook.rs`): trait-based execution interception with multi-stage callbacks
+  - `on_consume_recorded(owner, service_id, units, cost, cap_id)` — after Consume
+  - `on_meter_opened(owner, service_id, deposit)` — after OpenMeter
+  - `on_meter_closed(owner, service_id, deposit_returned)` — after CloseMeter
+- **StateMachine&lt;M: Hook&gt;** (`src/state/apply.rs`): orchestrator that calls hook at each stage
 - **NoOpHook**: default impl for backward compatibility
-- Phase 4 SettlementHook will implement `on_consume_recorded` to record consumption for settlement windows
+- Phase 4 SettlementHook will implement Hook to record for settlement windows
 
 ## Validation (WS-R2)
 

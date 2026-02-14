@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::state::hook::ApplyHook;
+use crate::state::hook::Hook;
 use crate::state::{MeterKey, State};
 use crate::tx::validation::{capability_id, validate, ValidationContext};
 use crate::tx::{SignedTx, Transaction};
@@ -13,7 +13,7 @@ pub struct StateMachine<M> {
     hook: M,
 }
 
-impl<M: ApplyHook> StateMachine<M> {
+impl<M: Hook> StateMachine<M> {
     pub fn new(hook: M) -> Self {
         StateMachine { hook }
     }
@@ -38,6 +38,7 @@ impl<M: ApplyHook> StateMachine<M> {
                 deposit,
             } => {
                 apply_open_meter(&mut new_state, owner, service_id, *deposit, &tx.signer)?;
+                self.hook.on_meter_opened(owner, service_id, *deposit)?;
             }
             Transaction::Consume {
                 owner,
@@ -71,7 +72,12 @@ impl<M: ApplyHook> StateMachine<M> {
                 )?;
             }
             Transaction::CloseMeter { owner, service_id } => {
+                let deposit_returned = new_state
+                    .get_meter(owner, service_id)
+                    .map(|m| m.locked_deposit())
+                    .unwrap_or(0);
                 apply_close_meter(&mut new_state, owner, service_id, &tx.signer)?;
+                self.hook.on_meter_closed(owner, service_id, deposit_returned)?;
             }
             Transaction::RevokeDelegation {
                 owner: _,

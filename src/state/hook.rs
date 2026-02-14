@@ -1,17 +1,16 @@
-//! ApplyHook: injectable strategy for metering/settlement interception (WS-R1).
+//! Hook: injectable strategy for metering/settlement interception (WS-R1).
 //!
-//! StateMachine<M: ApplyHook> coordinates the hook and core state transitions.
-//! Phase 4 Settlement can implement ApplyHook to record consumption for settlement windows.
+//! StateMachine<M: Hook> is an orchestrator that calls hook at each lifecycle stage.
+//! Phase 4 SettlementHook will implement Hook to record for settlement windows.
 
 use crate::error::Result;
 
-/// Hook for metering/settlement interception during apply.
+/// Trait-based hook for execution interception during apply.
 ///
-/// Default impl is a no-op. Phase 4 SettlementHook will record consumption
-/// for settlement window building.
-pub trait ApplyHook {
+/// Each callback is invoked at the corresponding stage. Default impls are no-op.
+/// Phase 4 SettlementHook implements these to record usage for settlement windows.
+pub trait Hook {
     /// Called after a Consume is recorded in state.
-    /// Use for settlement recording, usage aggregation, etc.
     fn on_consume_recorded(
         &mut self,
         _owner: &str,
@@ -22,10 +21,20 @@ pub trait ApplyHook {
     ) -> Result<()> {
         Ok(())
     }
+
+    /// Called after a meter is opened (or reactivated).
+    fn on_meter_opened(&mut self, _owner: &str, _service_id: &str, _deposit: u64) -> Result<()> {
+        Ok(())
+    }
+
+    /// Called after a meter is closed (deposit returned to owner).
+    fn on_meter_closed(&mut self, _owner: &str, _service_id: &str, _deposit_returned: u64) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// No-op hook: default for backward compatibility.
 #[derive(Debug, Clone, Default)]
 pub struct NoOpHook;
 
-impl ApplyHook for NoOpHook {}
+impl Hook for NoOpHook {}
