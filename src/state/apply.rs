@@ -1,5 +1,6 @@
 use crate::error::{Error, Result};
 use crate::state::hook::Hook;
+use crate::state::settlement::{Claim, ClaimId, Settlement, SettlementId};
 use crate::state::{MeterKey, State};
 use crate::tx::validation::{capability_id, validate, ValidationContext};
 use crate::tx::{SignedTx, Transaction};
@@ -104,6 +105,65 @@ impl<M: Hook> StateMachine<M> {
                 capability_id,
             } => {
                 apply_revoke_delegation(&mut new_state, capability_id, &tx.signer)?;
+            }
+            Transaction::ProposeSettlement {
+                owner,
+                service_id,
+                window_id,
+                from_tx_id,
+                to_tx_id,
+                gross_spent,
+                operator_share,
+                protocol_fee,
+                reserve_locked,
+                evidence_hash,
+            } => {
+                apply_propose_settlement(
+                    &mut new_state,
+                    owner,
+                    service_id,
+                    window_id,
+                    *from_tx_id,
+                    *to_tx_id,
+                    *gross_spent,
+                    *operator_share,
+                    *protocol_fee,
+                    *reserve_locked,
+                    evidence_hash,
+                    &tx.signer,
+                )?;
+            }
+            Transaction::FinalizeSettlement {
+                owner,
+                service_id,
+                window_id,
+            } => {
+                apply_finalize_settlement(&mut new_state, owner, service_id, window_id, &tx.signer)?;
+            }
+            Transaction::SubmitClaim {
+                operator,
+                owner,
+                service_id,
+                window_id,
+                claim_amount,
+            } => {
+                apply_submit_claim(
+                    &mut new_state,
+                    operator,
+                    owner,
+                    service_id,
+                    window_id,
+                    *claim_amount,
+                    &tx.signer,
+                )?;
+            }
+            Transaction::PayClaim {
+                operator,
+                owner,
+                service_id,
+                window_id,
+            } => {
+                apply_pay_claim(&mut new_state, operator, owner, service_id, window_id, &tx.signer)?;
             }
         }
 
@@ -215,6 +275,119 @@ fn apply_revoke_delegation(state: &mut State, capability_id: &str, signer: &str)
     let signer_account = state
         .get_account_mut(signer)
         .ok_or_else(|| Error::StateError(format!("Account {} not found", signer)))?;
+    signer_account.increment_nonce();
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_propose_settlement(
+    state: &mut State,
+    owner: &str,
+    service_id: &str,
+    window_id: &str,
+    from_tx_id: u64,
+    to_tx_id: u64,
+    gross_spent: u64,
+    operator_share: u64,
+    protocol_fee: u64,
+    reserve_locked: u64,
+    evidence_hash: &str,
+    signer: &str,
+) -> Result<()> {
+    let id = SettlementId::new(
+        owner.to_string(),
+        service_id.to_string(),
+        window_id.to_string(),
+    );
+    let settlement = Settlement::proposed(
+        id,
+        gross_spent,
+        operator_share,
+        protocol_fee,
+        reserve_locked,
+        evidence_hash.to_string(),
+        from_tx_id,
+        to_tx_id,
+    );
+    state.insert_settlement(settlement);
+    let signer_account = state.get_or_create_account(signer);
+    signer_account.increment_nonce();
+    Ok(())
+}
+
+fn apply_finalize_settlement(
+    state: &mut State,
+    owner: &str,
+    service_id: &str,
+    window_id: &str,
+    signer: &str,
+) -> Result<()> {
+    let id = SettlementId::new(
+        owner.to_string(),
+        service_id.to_string(),
+        window_id.to_string(),
+    );
+    let s = state
+        .get_settlement_mut(&id)
+        .ok_or(Error::SettlementNotFound)?;
+    s.finalize();
+    let signer_account = state.get_or_create_account(signer);
+    signer_account.increment_nonce();
+    Ok(())
+}
+
+fn apply_submit_claim(
+    state: &mut State,
+    operator: &str,
+    owner: &str,
+    service_id: &str,
+    window_id: &str,
+    claim_amount: u64,
+    signer: &str,
+) -> Result<()> {
+    let sid = SettlementId::new(
+        owner.to_string(),
+        service_id.to_string(),
+        window_id.to_string(),
+    );
+    let cid = ClaimId::new(operator.to_string(), &sid);
+    let claim = Claim::pending(cid, claim_amount);
+    state.insert_claim(claim);
+    let signer_account = state.get_or_create_account(signer);
+    signer_account.increment_nonce();
+    Ok(())
+}
+
+fn apply_pay_claim(
+    state: &mut State,
+    operator: &str,
+    owner: &str,
+    service_id: &str,
+    window_id: &str,
+    signer: &str,
+) -> Result<()> {
+    let sid = SettlementId::new(
+        owner.to_string(),
+        service_id.to_string(),
+        window_id.to_string(),
+    );
+    let cid = ClaimId::new(operator.to_string(), &sid);
+    let claim = state
+        .get_claim_mut(&cid)
+        .ok_or(Error::ClaimNotPending)?;
+    let amount = claim.claim_amount;
+    claim.pay();
+
+    let s = state
+        .get_settlement_mut(&sid)
+        .ok_or(Error::SettlementNotFound)?;
+    s.add_paid(amount);
+
+    // Pay operator: mint to operator (4A MVP; protocol/admin is signer/minter)
+    let operator_account = state.get_or_create_account(operator);
+    operator_account.add_balance(amount);
+
+    let signer_account = state.get_or_create_account(signer);
     signer_account.increment_nonce();
     Ok(())
 }

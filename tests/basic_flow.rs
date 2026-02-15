@@ -2137,3 +2137,140 @@ fn test_pre_phase4_error_code_deterministic() {
         "DELEGATED_CONSUME_REQUIRES_V2"
     );
 }
+
+// --- G1 Phase 4A: Settlement MVP ---
+
+/// G1: propose → finalize → submit claim → pay claim flow.
+#[test]
+fn test_g1_settlement_flow_propose_finalize_claim_pay() {
+    use metering_chain::evidence;
+    use metering_chain::state::{ClaimStatus, SettlementStatus};
+
+    let minters = get_authorized_minters();
+    let mut state = State::new();
+    let rctx = replay_ctx();
+
+    // 1. Create usage: mint, open meter, consume
+    let tx1 = SignedTx::new(
+        "authority".to_string(),
+        0,
+        Transaction::Mint {
+            to: "alice".to_string(),
+            amount: 1000,
+        },
+    );
+    state = apply(&state, &tx1, &rctx, Some(&minters)).unwrap();
+    let tx2 = SignedTx::new(
+        "alice".to_string(),
+        0,
+        Transaction::OpenMeter {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            deposit: 100,
+        },
+    );
+    state = apply(&state, &tx2, &rctx, Some(&minters)).unwrap();
+    let tx3 = SignedTx::new(
+        "alice".to_string(),
+        1,
+        Transaction::Consume {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            units: 10,
+            pricing: Pricing::UnitPrice(5),
+        },
+    );
+    state = apply(&state, &tx3, &rctx, Some(&minters)).unwrap();
+    let gross_spent = 50u64; // 10 * 5
+    let meter = state.get_meter("alice", "storage").unwrap();
+    assert_eq!(meter.total_spent(), gross_spent);
+
+    // 2. Propose settlement (operator 90%, protocol 10%, reserve 0)
+    let operator_share = 45u64;
+    let protocol_fee = 5u64;
+    let reserve_locked = 0u64;
+    let ev_hash = evidence::evidence_hash(b"alice:storage:w1:0:3");
+    let authority_nonce = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let tx_propose = SignedTx::new(
+        "authority".to_string(),
+        authority_nonce,
+        Transaction::ProposeSettlement {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            window_id: "w1".to_string(),
+            from_tx_id: 0,
+            to_tx_id: 3,
+            gross_spent,
+            operator_share,
+            protocol_fee,
+            reserve_locked,
+            evidence_hash: ev_hash.clone(),
+        },
+    );
+    state = apply(&state, &tx_propose, &rctx, Some(&minters)).unwrap();
+    let sid = metering_chain::state::SettlementId::new(
+        "alice".to_string(),
+        "storage".to_string(),
+        "w1".to_string(),
+    );
+    let s = state.get_settlement(&sid).unwrap();
+    assert_eq!(s.status, SettlementStatus::Proposed);
+    assert_eq!(s.gross_spent, gross_spent);
+    assert_eq!(s.operator_share, operator_share);
+
+    // 3. Finalize settlement
+    let authority_nonce = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let tx_finalize = SignedTx::new(
+        "authority".to_string(),
+        authority_nonce,
+        Transaction::FinalizeSettlement {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            window_id: "w1".to_string(),
+        },
+    );
+    state = apply(&state, &tx_finalize, &rctx, Some(&minters)).unwrap();
+    let s = state.get_settlement(&sid).unwrap();
+    assert!(s.is_finalized());
+    assert_eq!(s.payable(), operator_share);
+
+    // 4. Submit claim (operator = alice, claim full amount)
+    let cid =
+        metering_chain::state::ClaimId::new("alice".to_string(), &sid);
+    assert!(state.get_claim(&cid).is_none());
+    let tx_claim = SignedTx::new(
+        "alice".to_string(),
+        2, // alice nonce after consume
+        Transaction::SubmitClaim {
+            operator: "alice".to_string(),
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            window_id: "w1".to_string(),
+            claim_amount: operator_share,
+        },
+    );
+    let alice_bal_before = state.get_account("alice").unwrap().balance();
+    state = apply(&state, &tx_claim, &rctx, None).unwrap();
+    let c = state.get_claim(&cid).unwrap();
+    assert_eq!(c.status, ClaimStatus::Pending);
+
+    // 5. Pay claim (protocol/admin signs)
+    let authority_nonce = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let tx_pay = SignedTx::new(
+        "authority".to_string(),
+        authority_nonce,
+        Transaction::PayClaim {
+            operator: "alice".to_string(),
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            window_id: "w1".to_string(),
+        },
+    );
+    state = apply(&state, &tx_pay, &rctx, Some(&minters)).unwrap();
+    let alice_bal_after = state.get_account("alice").unwrap().balance();
+    assert_eq!(alice_bal_after, alice_bal_before + operator_share);
+    let c = state.get_claim(&cid).unwrap();
+    assert_eq!(c.status, ClaimStatus::Paid);
+    let s = state.get_settlement(&sid).unwrap();
+    assert_eq!(s.total_paid, operator_share);
+}

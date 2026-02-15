@@ -25,6 +25,13 @@ impl Error {
             CapabilityLimitExceeded => "CAPABILITY_LIMIT_EXCEEDED",
             DelegationRevoked => "DELEGATION_REVOKED",
             DelegationScopeMismatch => "DELEGATION_SCOPE_MISMATCH",
+            DuplicateSettlementWindow => "DUPLICATE_SETTLEMENT_WINDOW",
+            SettlementNotFound => "SETTLEMENT_NOT_FOUND",
+            SettlementNotProposed => "SETTLEMENT_NOT_PROPOSED",
+            SettlementNotFinalized => "SETTLEMENT_NOT_FINALIZED",
+            ClaimAmountExceedsPayable => "CLAIM_AMOUNT_EXCEEDS_PAYABLE",
+            ClaimNotPending => "CLAIM_NOT_PENDING",
+            SettlementConservationViolation => "SETTLEMENT_CONSERVATION_VIOLATION",
         }
     }
 }
@@ -88,6 +95,22 @@ pub enum Error {
 
     #[error("Delegation scope mismatch: proof service_id or ability does not match transaction")]
     DelegationScopeMismatch,
+
+    // Phase 4A: Settlement
+    #[error("Duplicate settlement window: same (owner, service_id, window_id) already exists")]
+    DuplicateSettlementWindow,
+    #[error("Settlement not found")]
+    SettlementNotFound,
+    #[error("Settlement not proposed or already finalized")]
+    SettlementNotProposed,
+    #[error("Settlement not finalized")]
+    SettlementNotFinalized,
+    #[error("Claim amount exceeds payable")]
+    ClaimAmountExceedsPayable,
+    #[error("Claim not found or not pending")]
+    ClaimNotPending,
+    #[error("Invalid settlement: gross_spent != operator_share + protocol_fee + reserve")]
+    SettlementConservationViolation,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

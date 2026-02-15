@@ -2,11 +2,13 @@ pub mod account;
 pub mod apply;
 pub mod hook;
 pub mod meter;
+pub mod settlement;
 
 pub use account::Account;
 pub use apply::{apply, StateMachine};
 pub use hook::{Hook, NoOpHook};
 pub use meter::Meter;
+pub use settlement::{Claim, ClaimId, ClaimStatus, Settlement, SettlementId, SettlementStatus};
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -31,7 +33,7 @@ pub struct CapabilityConsumption {
     pub consumed_cost: u64,
 }
 
-/// Core domain state: aggregates all accounts and meters
+/// Core domain state: aggregates all accounts, meters, settlements, claims.
 ///
 /// State is fully reconstructible by replaying transactions from genesis.
 /// All state transitions are deterministic and side-effect free.
@@ -50,6 +52,14 @@ pub struct State {
     /// Revoked capability IDs (owner-signed RevokeDelegation). Delegated Consume with this capability_id is rejected.
     #[serde(default)]
     pub revoked_capability_ids: HashSet<String>,
+
+    /// Phase 4A: Settlements indexed by (owner, service_id, window_id)
+    #[serde(default)]
+    pub settlements: HashMap<String, Settlement>,
+
+    /// Phase 4A: Claims indexed by (operator, settlement_key)
+    #[serde(default)]
+    pub claims: HashMap<String, Claim>,
 }
 
 impl State {
@@ -60,6 +70,8 @@ impl State {
             meters: HashMap::new(),
             capability_consumption: HashMap::new(),
             revoked_capability_ids: HashSet::new(),
+            settlements: HashMap::new(),
+            claims: HashMap::new(),
         }
     }
 
@@ -146,6 +158,38 @@ impl State {
             .values()
             .filter(|m| m.owner == owner && m.active)
             .collect()
+    }
+
+    /// Get settlement by id (owner, service_id, window_id).
+    pub fn get_settlement(&self, id: &SettlementId) -> Option<&Settlement> {
+        self.settlements.get(&id.key())
+    }
+
+    /// Get settlement mutably.
+    pub fn get_settlement_mut(&mut self, id: &SettlementId) -> Option<&mut Settlement> {
+        self.settlements.get_mut(&id.key())
+    }
+
+    /// Insert settlement.
+    pub fn insert_settlement(&mut self, s: Settlement) {
+        let key = s.id.key();
+        self.settlements.insert(key, s);
+    }
+
+    /// Get claim by id.
+    pub fn get_claim(&self, id: &ClaimId) -> Option<&Claim> {
+        self.claims.get(&id.key())
+    }
+
+    /// Get claim mutably.
+    pub fn get_claim_mut(&mut self, id: &ClaimId) -> Option<&mut Claim> {
+        self.claims.get_mut(&id.key())
+    }
+
+    /// Insert claim.
+    pub fn insert_claim(&mut self, c: Claim) {
+        let key = c.id.key();
+        self.claims.insert(key, c);
     }
 }
 

@@ -38,6 +38,41 @@ pub enum Transaction {
         owner: String,
         capability_id: String,
     },
+    // --- Phase 4A: Settlement ---
+    /// Propose settlement for a window (operator/protocol-signed).
+    ProposeSettlement {
+        owner: String,
+        service_id: String,
+        window_id: String,
+        from_tx_id: u64,
+        to_tx_id: u64,
+        gross_spent: u64,
+        operator_share: u64,
+        protocol_fee: u64,
+        reserve_locked: u64,
+        evidence_hash: String,
+    },
+    /// Finalize settlement (challenge window elapsed; 4A: no window, immediate).
+    FinalizeSettlement {
+        owner: String,
+        service_id: String,
+        window_id: String,
+    },
+    /// Submit claim for operator payable (operator-signed).
+    SubmitClaim {
+        operator: String,
+        owner: String,
+        service_id: String,
+        window_id: String,
+        claim_amount: u64,
+    },
+    /// Pay a pending claim (protocol/admin-signed).
+    PayClaim {
+        operator: String,
+        owner: String,
+        service_id: String,
+        window_id: String,
+    },
 }
 
 /// Payload V1: canonical signing (signer + nonce + kind). Used for legacy and owner-signed tx.
