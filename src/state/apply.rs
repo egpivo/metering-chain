@@ -372,10 +372,14 @@ fn apply_pay_claim(
         window_id.to_string(),
     );
     let cid = ClaimId::new(operator.to_string(), &sid);
+    let payable = state
+        .get_settlement(&sid)
+        .ok_or(Error::SettlementNotFound)?
+        .payable();
     let claim = state
         .get_claim_mut(&cid)
         .ok_or(Error::ClaimNotPending)?;
-    let amount = claim.claim_amount;
+    let amount = claim.claim_amount.min(payable);
     claim.pay();
 
     let s = state

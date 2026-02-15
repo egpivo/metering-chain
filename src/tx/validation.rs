@@ -823,6 +823,10 @@ fn validate_pay_claim(
             "Payout frozen by dispute".to_string(),
         ));
     }
+    let payable = s.payable();
+    if c.claim_amount > payable {
+        return Err(Error::ClaimAmountExceedsPayable);
+    }
     Ok(())
 }
 

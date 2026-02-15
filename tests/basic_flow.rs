@@ -2274,3 +2274,178 @@ fn test_g1_settlement_flow_propose_finalize_claim_pay() {
     let s = state.get_settlement(&sid).unwrap();
     assert_eq!(s.total_paid, operator_share);
 }
+
+/// Regression: PayClaim rejects when claim_amount exceeds remaining payable
+/// after a prior payment (prevents overpay).
+#[test]
+fn test_g1_pay_claim_rejects_overpay_after_partial_payment() {
+    use metering_chain::evidence;
+    use metering_chain::state::SettlementId;
+
+    let minters = get_authorized_minters();
+    let mut state = State::new();
+    let rctx = replay_ctx();
+
+    // 1. Usage + propose + finalize
+    let tx1 = SignedTx::new(
+        "authority".to_string(),
+        0,
+        Transaction::Mint {
+            to: "alice".to_string(),
+            amount: 1000,
+        },
+    );
+    state = apply(&state, &tx1, &rctx, Some(&minters)).unwrap();
+    let tx2 = SignedTx::new(
+        "alice".to_string(),
+        0,
+        Transaction::OpenMeter {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            deposit: 100,
+        },
+    );
+    state = apply(&state, &tx2, &rctx, Some(&minters)).unwrap();
+    let tx3 = SignedTx::new(
+        "alice".to_string(),
+        1,
+        Transaction::Consume {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            units: 10,
+            pricing: Pricing::UnitPrice(5),
+        },
+    );
+    state = apply(&state, &tx3, &rctx, Some(&minters)).unwrap();
+    let gross_spent = 50u64;
+    let operator_share = 45u64; // total payable pool (must satisfy gross_spent == operator_share + protocol_fee + reserve_locked)
+    let protocol_fee = 5u64;
+    let reserve_locked = 0u64;
+    let ev_hash = evidence::evidence_hash(b"alice:storage:w1:0:3");
+    let sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w1".to_string());
+
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::ProposeSettlement {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                from_tx_id: 0,
+                to_tx_id: 3,
+                gross_spent,
+                operator_share,
+                protocol_fee,
+                reserve_locked,
+                evidence_hash: ev_hash.clone(),
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::FinalizeSettlement {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+
+    // 2. Alice claims 30, Bob claims 40 (both valid at submit time: payable=45)
+    let alice_n = state.get_account("alice").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "alice".to_string(),
+            alice_n,
+            Transaction::SubmitClaim {
+                operator: "alice".to_string(),
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                claim_amount: 30,
+            },
+        ),
+        &rctx,
+        None,
+    )
+    .unwrap();
+
+    let bob_n = state.get_account("bob").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "bob".to_string(),
+            bob_n,
+            Transaction::SubmitClaim {
+                operator: "bob".to_string(),
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                claim_amount: 40,
+            },
+        ),
+        &rctx,
+        None,
+    )
+    .unwrap();
+
+    // 3. Pay alice first: total_paid=30, payable=15
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::PayClaim {
+                operator: "alice".to_string(),
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+
+    assert_eq!(state.get_settlement(&sid).unwrap().total_paid, 30);
+    assert_eq!(state.get_settlement(&sid).unwrap().payable(), 15);
+
+    // 4. Pay bob: claim_amount 40 > payable 15 → ClaimAmountExceedsPayable
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let res = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::PayClaim {
+                operator: "bob".to_string(),
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    );
+    assert!(
+        matches!(res, Err(Error::ClaimAmountExceedsPayable)),
+        "expected ClaimAmountExceedsPayable, got {:?}",
+        res
+    );
+}

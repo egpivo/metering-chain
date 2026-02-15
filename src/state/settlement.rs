@@ -108,7 +108,9 @@ impl Settlement {
     }
 
     pub fn add_paid(&mut self, amount: u64) {
-        self.total_paid = self.total_paid.saturating_add(amount);
+        let remaining = self.operator_share.saturating_sub(self.total_paid);
+        let to_add = amount.min(remaining);
+        self.total_paid = self.total_paid.saturating_add(to_add);
         if self.total_paid >= self.operator_share {
             self.status = SettlementStatus::Claimed;
         }
