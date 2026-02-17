@@ -6,7 +6,7 @@ use metering_chain::replay;
 use metering_chain::state::{apply, SettlementId, State};
 use metering_chain::storage::{FileStorage, Storage};
 use metering_chain::tx::validation::ValidationContext;
-use metering_chain::tx::{SignedTx, Transaction};
+use metering_chain::tx::{DisputeVerdict, SignedTx, Transaction};
 use metering_chain::wallet;
 use std::collections::HashSet;
 use std::fs;
@@ -242,6 +242,38 @@ pub enum SettlementSub {
         service_id: String,
         #[arg(long)]
         window_id: String,
+        #[arg(long, default_value = "authority")]
+        signer: String,
+        #[arg(long)]
+        allow_unsigned: bool,
+    },
+    /// Open a dispute on a finalized settlement (freezes payouts)
+    OpenDispute {
+        #[arg(long)]
+        owner: String,
+        #[arg(long)]
+        service_id: String,
+        #[arg(long)]
+        window_id: String,
+        #[arg(long, default_value = "")]
+        reason_code: String,
+        #[arg(long, default_value = "")]
+        evidence_hash: String,
+        #[arg(long, default_value = "authority")]
+        signer: String,
+        #[arg(long)]
+        allow_unsigned: bool,
+    },
+    /// Resolve an open dispute (verdict: upheld | dismissed)
+    ResolveDispute {
+        #[arg(long)]
+        owner: String,
+        #[arg(long)]
+        service_id: String,
+        #[arg(long)]
+        window_id: String,
+        #[arg(long)]
+        verdict: String,
         #[arg(long, default_value = "authority")]
         signer: String,
         #[arg(long)]
@@ -868,6 +900,120 @@ pub fn run(cli: Cli) -> Result<()> {
                     operator_balance_delta: operator_bal_after.saturating_sub(operator_bal_before),
                 };
                 println!("{}", format_output(&output, &cli.format)?);
+                Ok(())
+            }
+            SettlementSub::OpenDispute {
+                owner,
+                service_id,
+                window_id,
+                reason_code,
+                evidence_hash,
+                signer,
+                allow_unsigned,
+            } => {
+                let (mut state, mut next_tx_id) = load_or_create_state(&storage, &config)?;
+                let signer_nonce = state.get_account(&signer).map(|a| a.nonce()).unwrap_or(0);
+                let tx_open = SignedTx::new(
+                    signer.clone(),
+                    signer_nonce,
+                    Transaction::OpenDispute {
+                        owner: owner.clone(),
+                        service_id: service_id.clone(),
+                        window_id: window_id.clone(),
+                        reason_code: reason_code.clone(),
+                        evidence_hash: evidence_hash.clone(),
+                    },
+                );
+                let signed_tx = if allow_unsigned {
+                    tx_open
+                } else {
+                    get_wallets(&config)
+                        .sign_transaction(&signer, tx_open.nonce, tx_open.kind.clone())
+                        .map_err(|e| Error::SignatureVerification(e.to_string()))?
+                };
+                if signed_tx.signature.is_some() {
+                    wallet::verify_signature(&signed_tx)?;
+                } else if !allow_unsigned && !minters.contains(&signer) {
+                    return Err(Error::SignatureVerification(
+                        "OpenDispute requires signed tx or --allow-unsigned".to_string(),
+                    ));
+                }
+                let now = metering_chain::current_timestamp().max(0) as u64;
+                const DEFAULT_MAX_AGE: u64 = 300;
+                let live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                state = apply(&state, &signed_tx, &live_ctx, Some(&minters))?;
+                next_tx_id += 1;
+                storage.append_tx(&signed_tx)?;
+                storage.persist_state(&state, next_tx_id)?;
+                let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
+                let s = state.get_settlement(&sid).unwrap();
+                println!(
+                    "Dispute opened. Settlement {} status: {:?}",
+                    sid.key(),
+                    s.status
+                );
+                Ok(())
+            }
+            SettlementSub::ResolveDispute {
+                owner,
+                service_id,
+                window_id,
+                verdict,
+                signer,
+                allow_unsigned,
+            } => {
+                let (mut state, mut next_tx_id) = load_or_create_state(&storage, &config)?;
+                let verdict_enum = match verdict.to_lowercase().as_str() {
+                    "upheld" => DisputeVerdict::Upheld,
+                    "dismissed" => DisputeVerdict::Dismissed,
+                    _ => {
+                        return Err(Error::InvalidTransaction(format!(
+                            "verdict must be 'upheld' or 'dismissed', got '{}'",
+                            verdict
+                        )));
+                    }
+                };
+                let signer_nonce = state.get_account(&signer).map(|a| a.nonce()).unwrap_or(0);
+                let tx_resolve = SignedTx::new(
+                    signer.clone(),
+                    signer_nonce,
+                    Transaction::ResolveDispute {
+                        owner: owner.clone(),
+                        service_id: service_id.clone(),
+                        window_id: window_id.clone(),
+                        verdict: verdict_enum,
+                    },
+                );
+                let signed_tx = if allow_unsigned {
+                    tx_resolve
+                } else {
+                    get_wallets(&config)
+                        .sign_transaction(&signer, tx_resolve.nonce, tx_resolve.kind.clone())
+                        .map_err(|e| Error::SignatureVerification(e.to_string()))?
+                };
+                if signed_tx.signature.is_some() {
+                    wallet::verify_signature(&signed_tx)?;
+                } else if !allow_unsigned && !minters.contains(&signer) {
+                    return Err(Error::SignatureVerification(
+                        "ResolveDispute requires signed tx or --allow-unsigned".to_string(),
+                    ));
+                }
+                let now = metering_chain::current_timestamp().max(0) as u64;
+                const DEFAULT_MAX_AGE: u64 = 300;
+                let live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                state = apply(&state, &signed_tx, &live_ctx, Some(&minters))?;
+                next_tx_id += 1;
+                storage.append_tx(&signed_tx)?;
+                storage.persist_state(&state, next_tx_id)?;
+                let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
+                let s = state.get_settlement(&sid).unwrap();
+                let d = state.get_dispute(&metering_chain::state::DisputeId::new(&sid)).unwrap();
+                println!(
+                    "Dispute resolved: {:?}. Settlement {} status: {:?}",
+                    d.status,
+                    sid.key(),
+                    s.status
+                );
                 Ok(())
             }
             SettlementSub::List {

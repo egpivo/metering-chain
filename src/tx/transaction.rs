@@ -73,6 +73,31 @@ pub enum Transaction {
         service_id: String,
         window_id: String,
     },
+    // --- Phase 4B: Dispute ---
+    /// Open a dispute on a finalized settlement (freezes payouts).
+    OpenDispute {
+        owner: String,
+        service_id: String,
+        window_id: String,
+        reason_code: String,
+        evidence_hash: String,
+    },
+    /// Resolve an open dispute (verdict: Upheld or Dismissed).
+    ResolveDispute {
+        owner: String,
+        service_id: String,
+        window_id: String,
+        verdict: DisputeVerdict,
+    },
+}
+
+/// Verdict for ResolveDispute (Phase 4B).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DisputeVerdict {
+    /// Challenger wins; settlement stays blocked.
+    Upheld,
+    /// Settlement upheld; payouts can resume.
+    Dismissed,
 }
 
 /// Payload V1: canonical signing (signer + nonce + kind). Used for legacy and owner-signed tx.

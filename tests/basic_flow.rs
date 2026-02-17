@@ -3,7 +3,7 @@ use metering_chain::replay;
 use metering_chain::state::{apply, Account, Meter, State};
 use metering_chain::storage::{FileStorage, Storage};
 use metering_chain::tx::validation::ValidationContext;
-use metering_chain::tx::{Pricing, SignedTx, Transaction};
+use metering_chain::tx::{DisputeVerdict, Pricing, SignedTx, Transaction};
 use metering_chain::wallet::{verify_signature, Wallet};
 use std::collections::HashSet;
 use tempfile::TempDir;
@@ -2446,6 +2446,389 @@ fn test_g1_pay_claim_rejects_overpay_after_partial_payment() {
     assert!(
         matches!(res, Err(Error::ClaimAmountExceedsPayable)),
         "expected ClaimAmountExceedsPayable, got {:?}",
+        res
+    );
+}
+
+// --- G2 Phase 4B: Dispute freeze + resolve ---
+
+/// G2: Open dispute freezes payout; Resolve Dismissed allows PayClaim again.
+#[test]
+fn test_g2_dispute_freezes_payout_then_resolve_dismissed_allows_pay() {
+    use metering_chain::evidence;
+    use metering_chain::state::{DisputeId, DisputeStatus, SettlementId, SettlementStatus};
+
+    let minters = get_authorized_minters();
+    let mut state = State::new();
+    let rctx = replay_ctx();
+
+    // 1. Usage + propose + finalize
+    let tx1 = SignedTx::new(
+        "authority".to_string(),
+        0,
+        Transaction::Mint {
+            to: "alice".to_string(),
+            amount: 1000,
+        },
+    );
+    state = apply(&state, &tx1, &rctx, Some(&minters)).unwrap();
+    let tx2 = SignedTx::new(
+        "alice".to_string(),
+        0,
+        Transaction::OpenMeter {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            deposit: 100,
+        },
+    );
+    state = apply(&state, &tx2, &rctx, Some(&minters)).unwrap();
+    let tx3 = SignedTx::new(
+        "alice".to_string(),
+        1,
+        Transaction::Consume {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            units: 10,
+            pricing: Pricing::UnitPrice(5),
+        },
+    );
+    state = apply(&state, &tx3, &rctx, Some(&minters)).unwrap();
+    let gross_spent = 50u64;
+    let operator_share = 45u64;
+    let protocol_fee = 5u64;
+    let reserve_locked = 0u64;
+    let ev_hash = evidence::evidence_hash(b"alice:storage:w1:0:3");
+    let sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w1".to_string());
+
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::ProposeSettlement {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                from_tx_id: 0,
+                to_tx_id: 3,
+                gross_spent,
+                operator_share,
+                protocol_fee,
+                reserve_locked,
+                evidence_hash: ev_hash.clone(),
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::FinalizeSettlement {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+
+    // 2. Submit claim
+    let alice_n = state.get_account("alice").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "alice".to_string(),
+            alice_n,
+            Transaction::SubmitClaim {
+                operator: "alice".to_string(),
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                claim_amount: operator_share,
+            },
+        ),
+        &rctx,
+        None,
+    )
+    .unwrap();
+
+    // 3. Open dispute → settlement disputed
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::OpenDispute {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                reason_code: "evidence_mismatch".to_string(),
+                evidence_hash: ev_hash,
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    assert_eq!(
+        state.get_settlement(&sid).unwrap().status,
+        SettlementStatus::Disputed
+    );
+    let did = DisputeId::new(&sid);
+    assert!(state.get_dispute(&did).unwrap().is_open());
+
+    // 4. PayClaim rejected (payout frozen)
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let res = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::PayClaim {
+                operator: "alice".to_string(),
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    );
+    assert!(
+        res.is_err(),
+        "PayClaim must fail while dispute is open; got {:?}",
+        res
+    );
+
+    // 5. Resolve dispute Dismissed → settlement reverted to Finalized
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::ResolveDispute {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                verdict: DisputeVerdict::Dismissed,
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    assert_eq!(
+        state.get_dispute(&did).unwrap().status,
+        DisputeStatus::Dismissed
+    );
+    assert!(state.get_settlement(&sid).unwrap().is_finalized());
+
+    // 6. PayClaim now succeeds
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::PayClaim {
+                operator: "alice".to_string(),
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    assert_eq!(state.get_settlement(&sid).unwrap().total_paid, operator_share);
+}
+
+/// G2: Resolve dispute Upheld → settlement stays Disputed, PayClaim remains rejected.
+#[test]
+fn test_g2_resolve_dispute_upheld_keeps_payout_frozen() {
+    use metering_chain::evidence;
+    use metering_chain::state::{DisputeId, DisputeStatus, SettlementId, SettlementStatus};
+
+    let minters = get_authorized_minters();
+    let mut state = State::new();
+    let rctx = replay_ctx();
+
+    // 1. Usage + propose + finalize + submit claim
+    let tx1 = SignedTx::new(
+        "authority".to_string(),
+        0,
+        Transaction::Mint {
+            to: "alice".to_string(),
+            amount: 1000,
+        },
+    );
+    state = apply(&state, &tx1, &rctx, Some(&minters)).unwrap();
+    let tx2 = SignedTx::new(
+        "alice".to_string(),
+        0,
+        Transaction::OpenMeter {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            deposit: 100,
+        },
+    );
+    state = apply(&state, &tx2, &rctx, Some(&minters)).unwrap();
+    let tx3 = SignedTx::new(
+        "alice".to_string(),
+        1,
+        Transaction::Consume {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            units: 10,
+            pricing: Pricing::UnitPrice(5),
+        },
+    );
+    state = apply(&state, &tx3, &rctx, Some(&minters)).unwrap();
+    let gross_spent = 50u64;
+    let operator_share = 45u64;
+    let protocol_fee = 5u64;
+    let reserve_locked = 0u64;
+    let ev_hash = evidence::evidence_hash(b"alice:storage:w1:0:3");
+    let sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w1".to_string());
+
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::ProposeSettlement {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                from_tx_id: 0,
+                to_tx_id: 3,
+                gross_spent,
+                operator_share,
+                protocol_fee,
+                reserve_locked,
+                evidence_hash: ev_hash.clone(),
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::FinalizeSettlement {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    let alice_n = state.get_account("alice").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "alice".to_string(),
+            alice_n,
+            Transaction::SubmitClaim {
+                operator: "alice".to_string(),
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                claim_amount: operator_share,
+            },
+        ),
+        &rctx,
+        None,
+    )
+    .unwrap();
+
+    // 2. Open dispute
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::OpenDispute {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                reason_code: "evidence_mismatch".to_string(),
+                evidence_hash: ev_hash,
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    let did = DisputeId::new(&sid);
+
+    // 3. Resolve with Upheld → dispute closed, settlement stays Disputed
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::ResolveDispute {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                verdict: DisputeVerdict::Upheld,
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    assert_eq!(
+        state.get_dispute(&did).unwrap().status,
+        DisputeStatus::Upheld
+    );
+    assert_eq!(
+        state.get_settlement(&sid).unwrap().status,
+        SettlementStatus::Disputed,
+        "Upheld: settlement must remain Disputed (payouts stay frozen)"
+    );
+
+    // 4. PayClaim still rejected (payout frozen after Upheld)
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let res = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::PayClaim {
+                operator: "alice".to_string(),
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    );
+    assert!(
+        res.is_err(),
+        "PayClaim must remain rejected after Resolve Upheld; got {:?}",
         res
     );
 }

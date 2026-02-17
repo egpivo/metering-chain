@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::state::{ClaimId, SettlementId, State};
+use crate::state::{ClaimId, DisputeId, SettlementId, State};
 use crate::tx::{Pricing, SignedTx, Transaction};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
@@ -620,6 +620,14 @@ pub fn validate(
             validate_pay_claim(state, tx, authorized_minters)?;
             Ok(None)
         }
+        Transaction::OpenDispute { .. } => {
+            validate_open_dispute(state, tx, authorized_minters)?;
+            Ok(None)
+        }
+        Transaction::ResolveDispute { .. } => {
+            validate_resolve_dispute(state, tx, authorized_minters)?;
+            Ok(None)
+        }
     }
 }
 
@@ -826,6 +834,100 @@ fn validate_pay_claim(
     let payable = s.payable();
     if c.claim_amount > payable {
         return Err(Error::ClaimAmountExceedsPayable);
+    }
+    Ok(())
+}
+
+fn validate_open_dispute(
+    state: &State,
+    tx: &SignedTx,
+    authorized_minters: Option<&std::collections::HashSet<String>>,
+) -> Result<()> {
+    let Transaction::OpenDispute {
+        owner,
+        service_id,
+        window_id,
+        evidence_hash: _,
+        ..
+    } = &tx.kind
+    else {
+        unreachable!()
+    };
+    if let Some(minters) = authorized_minters {
+        if !minters.contains(&tx.signer) {
+            return Err(Error::InvalidTransaction(format!(
+                "OpenDispute: signer {} must be authorized minter/admin",
+                tx.signer
+            )));
+        }
+    }
+    let expected_nonce = state
+        .get_account(&tx.signer)
+        .map(|a| a.nonce())
+        .unwrap_or(0);
+    if tx.nonce != expected_nonce {
+        return Err(Error::InvalidTransaction(format!(
+            "OpenDispute: Nonce mismatch for signer {}: expected {}, got {}",
+            tx.signer,
+            expected_nonce,
+            tx.nonce
+        )));
+    }
+    let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
+    let s = state.get_settlement(&sid).ok_or(Error::SettlementNotFound)?;
+    if !s.is_finalized() {
+        return Err(Error::InvalidTransaction(
+            "OpenDispute: settlement must be finalized".to_string(),
+        ));
+    }
+    let did = DisputeId::new(&sid);
+    if let Some(d) = state.get_dispute(&did) {
+        if d.is_open() {
+            return Err(Error::DisputeAlreadyOpen);
+        }
+    }
+    Ok(())
+}
+
+fn validate_resolve_dispute(
+    state: &State,
+    tx: &SignedTx,
+    authorized_minters: Option<&std::collections::HashSet<String>>,
+) -> Result<()> {
+    let Transaction::ResolveDispute {
+        owner,
+        service_id,
+        window_id,
+        ..
+    } = &tx.kind
+    else {
+        unreachable!()
+    };
+    if let Some(minters) = authorized_minters {
+        if !minters.contains(&tx.signer) {
+            return Err(Error::InvalidTransaction(format!(
+                "ResolveDispute: signer {} must be authorized minter/admin",
+                tx.signer
+            )));
+        }
+    }
+    let expected_nonce = state
+        .get_account(&tx.signer)
+        .map(|a| a.nonce())
+        .unwrap_or(0);
+    if tx.nonce != expected_nonce {
+        return Err(Error::InvalidTransaction(format!(
+            "ResolveDispute: Nonce mismatch for signer {}: expected {}, got {}",
+            tx.signer,
+            expected_nonce,
+            tx.nonce
+        )));
+    }
+    let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
+    let did = DisputeId::new(&sid);
+    let d = state.get_dispute(&did).ok_or(Error::DisputeNotFound)?;
+    if !d.is_open() {
+        return Err(Error::DisputeNotOpen);
     }
     Ok(())
 }

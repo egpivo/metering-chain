@@ -32,6 +32,9 @@ impl Error {
             ClaimAmountExceedsPayable => "CLAIM_AMOUNT_EXCEEDS_PAYABLE",
             ClaimNotPending => "CLAIM_NOT_PENDING",
             SettlementConservationViolation => "SETTLEMENT_CONSERVATION_VIOLATION",
+            DisputeAlreadyOpen => "DISPUTE_ALREADY_OPEN",
+            DisputeNotFound => "DISPUTE_NOT_FOUND",
+            DisputeNotOpen => "DISPUTE_NOT_OPEN",
         }
     }
 }
@@ -111,6 +114,14 @@ pub enum Error {
     ClaimNotPending,
     #[error("Invalid settlement: gross_spent != operator_share + protocol_fee + reserve")]
     SettlementConservationViolation,
+
+    // Phase 4B: Dispute
+    #[error("Dispute already open for this settlement")]
+    DisputeAlreadyOpen,
+    #[error("Dispute not found")]
+    DisputeNotFound,
+    #[error("Dispute not open (already resolved)")]
+    DisputeNotOpen,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

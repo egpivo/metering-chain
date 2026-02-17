@@ -123,6 +123,18 @@ impl Settlement {
     pub fn is_disputed(&self) -> bool {
         self.status == SettlementStatus::Disputed
     }
+
+    /// Revert to Finalized after dispute dismissed (G2: payouts can resume).
+    pub fn reopen_after_dismissed(&mut self) {
+        if self.status == SettlementStatus::Disputed {
+            self.status = SettlementStatus::Finalized;
+        }
+    }
+
+    /// Mark settlement as disputed (block payouts).
+    pub fn mark_disputed(&mut self) {
+        self.status = SettlementStatus::Disputed;
+    }
 }
 
 /// Claim aggregate identity: (operator, settlement_key).
@@ -172,5 +184,76 @@ impl Claim {
 
     pub fn is_pending(&self) -> bool {
         self.status == ClaimStatus::Pending
+    }
+}
+
+// --- Phase 4B: Dispute aggregate ---
+
+/// Dispute status (Phase 4B).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DisputeStatus {
+    /// Dispute opened; payouts frozen for target settlement.
+    Open,
+    /// Dispute closed in favor of challenger (settlement corrected or blocked).
+    Upheld,
+    /// Dispute closed in favor of settlement (payouts can resume).
+    Dismissed,
+}
+
+/// Dispute aggregate identity: one open dispute per settlement (key = settlement_key).
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DisputeId {
+    pub settlement_key: String,
+}
+
+impl DisputeId {
+    pub fn new(settlement_id: &SettlementId) -> Self {
+        DisputeId {
+            settlement_key: settlement_id.key(),
+        }
+    }
+
+    pub fn key(&self) -> &str {
+        &self.settlement_key
+    }
+}
+
+/// Dispute aggregate (Phase 4B).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Dispute {
+    pub id: DisputeId,
+    pub target_settlement_id: SettlementId,
+    pub reason_code: String,
+    pub evidence_hash: String,
+    /// Epoch secs when dispute was opened (0 if not used).
+    pub opened_at: u64,
+    pub status: DisputeStatus,
+}
+
+impl Dispute {
+    pub fn open(
+        target_settlement_id: SettlementId,
+        reason_code: String,
+        evidence_hash: String,
+        opened_at: u64,
+    ) -> Self {
+        let id = DisputeId::new(&target_settlement_id);
+        Dispute {
+            id,
+            target_settlement_id,
+            reason_code,
+            evidence_hash,
+            opened_at,
+            status: DisputeStatus::Open,
+        }
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.status == DisputeStatus::Open
+    }
+
+    pub fn resolve(&mut self, verdict: DisputeStatus) {
+        debug_assert!(matches!(verdict, DisputeStatus::Upheld | DisputeStatus::Dismissed));
+        self.status = verdict;
     }
 }

@@ -1,9 +1,9 @@
 use crate::error::{Error, Result};
 use crate::state::hook::Hook;
-use crate::state::settlement::{Claim, ClaimId, Settlement, SettlementId};
+use crate::state::settlement::{Claim, ClaimId, Dispute, DisputeId, DisputeStatus, Settlement, SettlementId};
 use crate::state::{MeterKey, State};
 use crate::tx::validation::{capability_id, validate, ValidationContext};
-use crate::tx::{SignedTx, Transaction};
+use crate::tx::{SignedTx, Transaction, DisputeVerdict};
 use std::collections::HashSet;
 
 /// State machine with injectable hook for metering/settlement interception.
@@ -164,6 +164,31 @@ impl<M: Hook> StateMachine<M> {
                 window_id,
             } => {
                 apply_pay_claim(&mut new_state, operator, owner, service_id, window_id, &tx.signer)?;
+            }
+            Transaction::OpenDispute {
+                owner,
+                service_id,
+                window_id,
+                reason_code,
+                evidence_hash,
+            } => {
+                apply_open_dispute(
+                    &mut new_state,
+                    owner,
+                    service_id,
+                    window_id,
+                    reason_code,
+                    evidence_hash,
+                    &tx.signer,
+                )?;
+            }
+            Transaction::ResolveDispute {
+                owner,
+                service_id,
+                window_id,
+                verdict,
+            } => {
+                apply_resolve_dispute(&mut new_state, owner, service_id, window_id, *verdict, &tx.signer)?;
             }
         }
 
@@ -391,6 +416,67 @@ fn apply_pay_claim(
     let operator_account = state.get_or_create_account(operator);
     operator_account.add_balance(amount);
 
+    let signer_account = state.get_or_create_account(signer);
+    signer_account.increment_nonce();
+    Ok(())
+}
+
+fn apply_open_dispute(
+    state: &mut State,
+    owner: &str,
+    service_id: &str,
+    window_id: &str,
+    reason_code: &str,
+    evidence_hash: &str,
+    signer: &str,
+) -> Result<()> {
+    let sid = SettlementId::new(
+        owner.to_string(),
+        service_id.to_string(),
+        window_id.to_string(),
+    );
+    let dispute = Dispute::open(
+        sid.clone(),
+        reason_code.to_string(),
+        evidence_hash.to_string(),
+        0, // opened_at: 0 for replay/MVP; can use ctx.now in future
+    );
+    state.insert_dispute(dispute);
+    let s = state
+        .get_settlement_mut(&sid)
+        .ok_or(Error::SettlementNotFound)?;
+    s.mark_disputed();
+    let signer_account = state.get_or_create_account(signer);
+    signer_account.increment_nonce();
+    Ok(())
+}
+
+fn apply_resolve_dispute(
+    state: &mut State,
+    owner: &str,
+    service_id: &str,
+    window_id: &str,
+    verdict: DisputeVerdict,
+    signer: &str,
+) -> Result<()> {
+    let sid = SettlementId::new(
+        owner.to_string(),
+        service_id.to_string(),
+        window_id.to_string(),
+    );
+    let did = DisputeId::new(&sid);
+    let dispute = state.get_dispute_mut(&did).ok_or(Error::DisputeNotFound)?;
+    let status = match verdict {
+        DisputeVerdict::Upheld => DisputeStatus::Upheld,
+        DisputeVerdict::Dismissed => DisputeStatus::Dismissed,
+    };
+    dispute.resolve(status);
+    if verdict == DisputeVerdict::Dismissed {
+        let s = state
+            .get_settlement_mut(&sid)
+            .ok_or(Error::SettlementNotFound)?;
+        s.reopen_after_dismissed();
+    }
     let signer_account = state.get_or_create_account(signer);
     signer_account.increment_nonce();
     Ok(())

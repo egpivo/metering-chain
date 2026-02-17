@@ -8,7 +8,10 @@ pub use account::Account;
 pub use apply::{apply, StateMachine};
 pub use hook::{Hook, NoOpHook};
 pub use meter::Meter;
-pub use settlement::{Claim, ClaimId, ClaimStatus, Settlement, SettlementId, SettlementStatus};
+pub use settlement::{
+    Claim, ClaimId, ClaimStatus, Dispute, DisputeId, DisputeStatus, Settlement, SettlementId,
+    SettlementStatus,
+};
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -60,6 +63,10 @@ pub struct State {
     /// Phase 4A: Claims indexed by (operator, settlement_key)
     #[serde(default)]
     pub claims: HashMap<String, Claim>,
+
+    /// Phase 4B: Disputes indexed by settlement_key (one open dispute per settlement)
+    #[serde(default)]
+    pub disputes: HashMap<String, Dispute>,
 }
 
 impl State {
@@ -72,6 +79,7 @@ impl State {
             revoked_capability_ids: HashSet::new(),
             settlements: HashMap::new(),
             claims: HashMap::new(),
+            disputes: HashMap::new(),
         }
     }
 
@@ -188,8 +196,24 @@ impl State {
 
     /// Insert claim.
     pub fn insert_claim(&mut self, c: Claim) {
-        let key = c.id.key();
+        let key = c.id.key().to_string();
         self.claims.insert(key, c);
+    }
+
+    /// Get dispute by id (settlement_key).
+    pub fn get_dispute(&self, id: &DisputeId) -> Option<&Dispute> {
+        self.disputes.get(id.key())
+    }
+
+    /// Get dispute mutably.
+    pub fn get_dispute_mut(&mut self, id: &DisputeId) -> Option<&mut Dispute> {
+        self.disputes.get_mut(id.key())
+    }
+
+    /// Insert or replace dispute.
+    pub fn insert_dispute(&mut self, d: Dispute) {
+        let key = d.id.key().to_string();
+        self.disputes.insert(key, d);
     }
 }
 
