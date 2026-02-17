@@ -857,7 +857,10 @@ pub fn run(cli: Cli) -> Result<()> {
                     .ok_or(Error::ClaimNotPending)?
                     .claim_amount;
                 let signer_nonce = state.get_account(&signer).map(|a| a.nonce()).unwrap_or(0);
-                let operator_bal_before = state.get_account(&operator).map(|a| a.balance()).unwrap_or(0);
+                let operator_bal_before = state
+                    .get_account(&operator)
+                    .map(|a| a.balance())
+                    .unwrap_or(0);
 
                 let tx_pay = SignedTx::new(
                     signer.clone(),
@@ -892,7 +895,10 @@ pub fn run(cli: Cli) -> Result<()> {
                 storage.append_tx(&signed_tx)?;
                 storage.persist_state(&state, next_tx_id)?;
 
-                let operator_bal_after = state.get_account(&operator).map(|a| a.balance()).unwrap_or(0);
+                let operator_bal_after = state
+                    .get_account(&operator)
+                    .map(|a| a.balance())
+                    .unwrap_or(0);
                 let output = ClaimPayOutput {
                     claim_id: cid.key(),
                     status: "Paid",
@@ -1007,7 +1013,9 @@ pub fn run(cli: Cli) -> Result<()> {
                 storage.persist_state(&state, next_tx_id)?;
                 let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
                 let s = state.get_settlement(&sid).unwrap();
-                let d = state.get_dispute(&metering_chain::state::DisputeId::new(&sid)).unwrap();
+                let d = state
+                    .get_dispute(&metering_chain::state::DisputeId::new(&sid))
+                    .unwrap();
                 println!(
                     "Dispute resolved: {:?}. Settlement {} status: {:?}",
                     d.status,
@@ -1027,14 +1035,14 @@ pub fn run(cli: Cli) -> Result<()> {
                     .values()
                     .filter(|s| {
                         owner.as_ref().is_none_or(|o| s.id.owner == *o)
-                            && service_id.as_ref().is_none_or(|sid| s.id.service_id == *sid)
-                            && status
+                            && service_id
                                 .as_ref()
-                                .is_none_or(|st| {
-                                    format!("{:?}", s.status)
-                                        .to_lowercase()
-                                        .contains(&st.to_lowercase())
-                                })
+                                .is_none_or(|sid| s.id.service_id == *sid)
+                            && status.as_ref().is_none_or(|st| {
+                                format!("{:?}", s.status)
+                                    .to_lowercase()
+                                    .contains(&st.to_lowercase())
+                            })
                     })
                     .map(|s| SettlementListOutput {
                         settlement_id: s.id.key(),
@@ -1059,7 +1067,9 @@ pub fn run(cli: Cli) -> Result<()> {
             } => {
                 let (state, _) = load_or_create_state(&storage, &config)?;
                 let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
-                let s = state.get_settlement(&sid).ok_or(Error::SettlementNotFound)?;
+                let s = state
+                    .get_settlement(&sid)
+                    .ok_or(Error::SettlementNotFound)?;
                 let output = SettlementShowOutput {
                     settlement_id: sid.key(),
                     owner: s.id.owner.clone(),

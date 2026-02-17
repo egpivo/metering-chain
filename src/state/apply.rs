@@ -1,9 +1,11 @@
 use crate::error::{Error, Result};
 use crate::state::hook::Hook;
-use crate::state::settlement::{Claim, ClaimId, Dispute, DisputeId, DisputeStatus, Settlement, SettlementId};
+use crate::state::settlement::{
+    Claim, ClaimId, Dispute, DisputeId, DisputeStatus, Settlement, SettlementId,
+};
 use crate::state::{MeterKey, State};
 use crate::tx::validation::{capability_id, validate, ValidationContext};
-use crate::tx::{SignedTx, Transaction, DisputeVerdict};
+use crate::tx::{DisputeVerdict, SignedTx, Transaction};
 use std::collections::HashSet;
 
 /// State machine with injectable hook for metering/settlement interception.
@@ -138,7 +140,13 @@ impl<M: Hook> StateMachine<M> {
                 service_id,
                 window_id,
             } => {
-                apply_finalize_settlement(&mut new_state, owner, service_id, window_id, &tx.signer)?;
+                apply_finalize_settlement(
+                    &mut new_state,
+                    owner,
+                    service_id,
+                    window_id,
+                    &tx.signer,
+                )?;
             }
             Transaction::SubmitClaim {
                 operator,
@@ -163,7 +171,14 @@ impl<M: Hook> StateMachine<M> {
                 service_id,
                 window_id,
             } => {
-                apply_pay_claim(&mut new_state, operator, owner, service_id, window_id, &tx.signer)?;
+                apply_pay_claim(
+                    &mut new_state,
+                    operator,
+                    owner,
+                    service_id,
+                    window_id,
+                    &tx.signer,
+                )?;
             }
             Transaction::OpenDispute {
                 owner,
@@ -188,7 +203,14 @@ impl<M: Hook> StateMachine<M> {
                 window_id,
                 verdict,
             } => {
-                apply_resolve_dispute(&mut new_state, owner, service_id, window_id, *verdict, &tx.signer)?;
+                apply_resolve_dispute(
+                    &mut new_state,
+                    owner,
+                    service_id,
+                    window_id,
+                    *verdict,
+                    &tx.signer,
+                )?;
             }
         }
 
@@ -401,9 +423,7 @@ fn apply_pay_claim(
         .get_settlement(&sid)
         .ok_or(Error::SettlementNotFound)?
         .payable();
-    let claim = state
-        .get_claim_mut(&cid)
-        .ok_or(Error::ClaimNotPending)?;
+    let claim = state.get_claim_mut(&cid).ok_or(Error::ClaimNotPending)?;
     let amount = claim.claim_amount.min(payable);
     claim.pay();
 

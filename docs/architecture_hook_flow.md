@@ -1,6 +1,6 @@
 # Metering-Chain: Hook Flow Architecture
 
-Current codebase architecture (G0 refactoring).
+Current codebase architecture (through G2: Settlement + Dispute).
 
 ## High-Level Flow
 

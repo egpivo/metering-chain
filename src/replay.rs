@@ -56,10 +56,7 @@ pub fn load_tx_slice<S: Storage>(storage: &S, from_tx_id: u64) -> Result<Vec<Sig
 /// Returns state after applying txs 0..up_to_tx_id-1. Used for settlement propose.
 pub fn replay_up_to<S: Storage>(storage: &S, up_to_tx_id: u64) -> Result<State> {
     let all_txs = storage.load_txs_from(0)?;
-    let to_apply: Vec<_> = all_txs
-        .into_iter()
-        .take(up_to_tx_id as usize)
-        .collect();
+    let to_apply: Vec<_> = all_txs.into_iter().take(up_to_tx_id as usize).collect();
     let replay_ctx = ValidationContext::replay();
     let mut state = State::new();
     for tx in to_apply {

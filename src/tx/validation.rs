@@ -719,9 +719,7 @@ fn validate_finalize_settlement(
         )));
     }
     let id = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
-    let s = state
-        .get_settlement(&id)
-        .ok_or(Error::SettlementNotFound)?;
+    let s = state.get_settlement(&id).ok_or(Error::SettlementNotFound)?;
     if s.status != crate::state::SettlementStatus::Proposed {
         return Err(Error::SettlementNotProposed);
     }
@@ -750,10 +748,7 @@ fn validate_submit_claim(state: &State, tx: &SignedTx) -> Result<()> {
             tx.signer, operator
         )));
     }
-    let expected_nonce = state
-        .get_account(operator)
-        .map(|a| a.nonce())
-        .unwrap_or(0);
+    let expected_nonce = state.get_account(operator).map(|a| a.nonce()).unwrap_or(0);
     if tx.nonce != expected_nonce {
         return Err(Error::InvalidTransaction(format!(
             "SubmitClaim: Nonce mismatch for operator {}: expected {}, got {}",
@@ -868,13 +863,13 @@ fn validate_open_dispute(
     if tx.nonce != expected_nonce {
         return Err(Error::InvalidTransaction(format!(
             "OpenDispute: Nonce mismatch for signer {}: expected {}, got {}",
-            tx.signer,
-            expected_nonce,
-            tx.nonce
+            tx.signer, expected_nonce, tx.nonce
         )));
     }
     let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
-    let s = state.get_settlement(&sid).ok_or(Error::SettlementNotFound)?;
+    let s = state
+        .get_settlement(&sid)
+        .ok_or(Error::SettlementNotFound)?;
     if !s.is_finalized() {
         return Err(Error::InvalidTransaction(
             "OpenDispute: settlement must be finalized".to_string(),
@@ -918,9 +913,7 @@ fn validate_resolve_dispute(
     if tx.nonce != expected_nonce {
         return Err(Error::InvalidTransaction(format!(
             "ResolveDispute: Nonce mismatch for signer {}: expected {}, got {}",
-            tx.signer,
-            expected_nonce,
-            tx.nonce
+            tx.signer, expected_nonce, tx.nonce
         )));
     }
     let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());

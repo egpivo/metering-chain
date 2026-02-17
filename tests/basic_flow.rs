@@ -2190,7 +2190,10 @@ fn test_g1_settlement_flow_propose_finalize_claim_pay() {
     let protocol_fee = 5u64;
     let reserve_locked = 0u64;
     let ev_hash = evidence::evidence_hash(b"alice:storage:w1:0:3");
-    let authority_nonce = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let authority_nonce = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     let tx_propose = SignedTx::new(
         "authority".to_string(),
         authority_nonce,
@@ -2219,7 +2222,10 @@ fn test_g1_settlement_flow_propose_finalize_claim_pay() {
     assert_eq!(s.operator_share, operator_share);
 
     // 3. Finalize settlement
-    let authority_nonce = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let authority_nonce = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     let tx_finalize = SignedTx::new(
         "authority".to_string(),
         authority_nonce,
@@ -2235,8 +2241,7 @@ fn test_g1_settlement_flow_propose_finalize_claim_pay() {
     assert_eq!(s.payable(), operator_share);
 
     // 4. Submit claim (operator = alice, claim full amount)
-    let cid =
-        metering_chain::state::ClaimId::new("alice".to_string(), &sid);
+    let cid = metering_chain::state::ClaimId::new("alice".to_string(), &sid);
     assert!(state.get_claim(&cid).is_none());
     let tx_claim = SignedTx::new(
         "alice".to_string(),
@@ -2255,7 +2260,10 @@ fn test_g1_settlement_flow_propose_finalize_claim_pay() {
     assert_eq!(c.status, ClaimStatus::Pending);
 
     // 5. Pay claim (protocol/admin signs)
-    let authority_nonce = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let authority_nonce = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     let tx_pay = SignedTx::new(
         "authority".to_string(),
         authority_nonce,
@@ -2324,7 +2332,10 @@ fn test_g1_pay_claim_rejects_overpay_after_partial_payment() {
     let ev_hash = evidence::evidence_hash(b"alice:storage:w1:0:3");
     let sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w1".to_string());
 
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -2348,7 +2359,10 @@ fn test_g1_pay_claim_rejects_overpay_after_partial_payment() {
     )
     .unwrap();
 
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -2405,7 +2419,10 @@ fn test_g1_pay_claim_rejects_overpay_after_partial_payment() {
     .unwrap();
 
     // 3. Pay alice first: total_paid=30, payable=15
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -2427,7 +2444,10 @@ fn test_g1_pay_claim_rejects_overpay_after_partial_payment() {
     assert_eq!(state.get_settlement(&sid).unwrap().payable(), 15);
 
     // 4. Pay bob: claim_amount 40 > payable 15 → ClaimAmountExceedsPayable
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     let res = apply(
         &state,
         &SignedTx::new(
@@ -2500,7 +2520,10 @@ fn test_g2_dispute_freezes_payout_then_resolve_dismissed_allows_pay() {
     let ev_hash = evidence::evidence_hash(b"alice:storage:w1:0:3");
     let sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w1".to_string());
 
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -2523,7 +2546,10 @@ fn test_g2_dispute_freezes_payout_then_resolve_dismissed_allows_pay() {
         Some(&minters),
     )
     .unwrap();
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -2561,7 +2587,10 @@ fn test_g2_dispute_freezes_payout_then_resolve_dismissed_allows_pay() {
     .unwrap();
 
     // 3. Open dispute → settlement disputed
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -2587,7 +2616,10 @@ fn test_g2_dispute_freezes_payout_then_resolve_dismissed_allows_pay() {
     assert!(state.get_dispute(&did).unwrap().is_open());
 
     // 4. PayClaim rejected (payout frozen)
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     let res = apply(
         &state,
         &SignedTx::new(
@@ -2610,7 +2642,10 @@ fn test_g2_dispute_freezes_payout_then_resolve_dismissed_allows_pay() {
     );
 
     // 5. Resolve dispute Dismissed → settlement reverted to Finalized
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -2634,7 +2669,10 @@ fn test_g2_dispute_freezes_payout_then_resolve_dismissed_allows_pay() {
     assert!(state.get_settlement(&sid).unwrap().is_finalized());
 
     // 6. PayClaim now succeeds
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -2651,7 +2689,10 @@ fn test_g2_dispute_freezes_payout_then_resolve_dismissed_allows_pay() {
         Some(&minters),
     )
     .unwrap();
-    assert_eq!(state.get_settlement(&sid).unwrap().total_paid, operator_share);
+    assert_eq!(
+        state.get_settlement(&sid).unwrap().total_paid,
+        operator_share
+    );
 }
 
 /// G2: Resolve dispute Upheld → settlement stays Disputed, PayClaim remains rejected.
@@ -2702,7 +2743,10 @@ fn test_g2_resolve_dispute_upheld_keeps_payout_frozen() {
     let ev_hash = evidence::evidence_hash(b"alice:storage:w1:0:3");
     let sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w1".to_string());
 
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -2725,7 +2769,10 @@ fn test_g2_resolve_dispute_upheld_keeps_payout_frozen() {
         Some(&minters),
     )
     .unwrap();
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -2761,7 +2808,10 @@ fn test_g2_resolve_dispute_upheld_keeps_payout_frozen() {
     .unwrap();
 
     // 2. Open dispute
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -2782,7 +2832,10 @@ fn test_g2_resolve_dispute_upheld_keeps_payout_frozen() {
     let did = DisputeId::new(&sid);
 
     // 3. Resolve with Upheld → dispute closed, settlement stays Disputed
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -2810,7 +2863,10 @@ fn test_g2_resolve_dispute_upheld_keeps_payout_frozen() {
     );
 
     // 4. PayClaim still rejected (payout frozen after Upheld)
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     let res = apply(
         &state,
         &SignedTx::new(

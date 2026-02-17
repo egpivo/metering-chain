@@ -117,7 +117,10 @@ impl Settlement {
     }
 
     pub fn is_finalized(&self) -> bool {
-        matches!(self.status, SettlementStatus::Finalized | SettlementStatus::Claimed)
+        matches!(
+            self.status,
+            SettlementStatus::Finalized | SettlementStatus::Claimed
+        )
     }
 
     pub fn is_disputed(&self) -> bool {
@@ -253,7 +256,10 @@ impl Dispute {
     }
 
     pub fn resolve(&mut self, verdict: DisputeStatus) {
-        debug_assert!(matches!(verdict, DisputeStatus::Upheld | DisputeStatus::Dismissed));
+        debug_assert!(matches!(
+            verdict,
+            DisputeStatus::Upheld | DisputeStatus::Dismissed
+        ));
         self.status = verdict;
     }
 }

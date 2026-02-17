@@ -3,8 +3,8 @@
 //! Run: cargo run --example settlement_demo
 
 use metering_chain::evidence;
-use metering_chain::state::{ClaimStatus, State, StateMachine};
 use metering_chain::state::{ClaimId, NoOpHook, SettlementId, SettlementStatus};
+use metering_chain::state::{ClaimStatus, State, StateMachine};
 use metering_chain::tx::validation::ValidationContext;
 use metering_chain::tx::{Pricing, SignedTx, Transaction};
 use std::collections::HashSet;
@@ -63,12 +63,18 @@ fn main() -> metering_chain::error::Result<()> {
 
     // 2. Propose settlement
     let operator_share = 45u64; // 90%
-    let protocol_fee = 5u64;    // 10%
+    let protocol_fee = 5u64; // 10%
     let reserve_locked = 0u64;
     let ev_hash = evidence::evidence_hash(b"alice:storage:w1:0:3");
 
-    println!("4. Propose settlement (w1: gross={}, operator={}, protocol={})", gross_spent, operator_share, protocol_fee);
-    let authority_nonce = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    println!(
+        "4. Propose settlement (w1: gross={}, operator={}, protocol={})",
+        gross_spent, operator_share, protocol_fee
+    );
+    let authority_nonce = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     let tx_propose = SignedTx::new(
         "authority".to_string(),
         authority_nonce,
@@ -94,7 +100,10 @@ fn main() -> metering_chain::error::Result<()> {
 
     // 3. Finalize settlement
     println!("5. Finalize settlement");
-    let authority_nonce = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let authority_nonce = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     let tx_finalize = SignedTx::new(
         "authority".to_string(),
         authority_nonce,
@@ -132,7 +141,10 @@ fn main() -> metering_chain::error::Result<()> {
     // 5. Pay claim
     let alice_before = state.get_account("alice").unwrap().balance();
     println!("7. Pay claim (authority pays alice)");
-    let authority_nonce = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let authority_nonce = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     let tx_pay = SignedTx::new(
         "authority".to_string(),
         authority_nonce,
@@ -147,7 +159,10 @@ fn main() -> metering_chain::error::Result<()> {
     let alice_after = state.get_account("alice").unwrap().balance();
     let c = state.get_claim(&cid).unwrap();
     assert_eq!(c.status, ClaimStatus::Paid);
-    println!("   Claim paid. Alice balance: {} -> {}\n", alice_before, alice_after);
+    println!(
+        "   Claim paid. Alice balance: {} -> {}\n",
+        alice_before, alice_after
+    );
 
     println!("=== Done ===");
     Ok(())
