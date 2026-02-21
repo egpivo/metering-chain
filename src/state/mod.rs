@@ -265,6 +265,21 @@ impl State {
         }
         None
     }
+
+    /// Return the scope chain for (owner, service_id) in precedence order for debugging/audit.
+    /// Order: OwnerService, Owner, Global.
+    pub fn resolve_scope_chain(&self, owner: &str, service_id: &str) -> Vec<PolicyScope> {
+        PolicyScope::scope_chain(owner, service_id)
+    }
+
+    /// Latest version number for a scope (max version with this scope_key). None if no versions.
+    pub fn latest_policy_version_for_scope(&self, scope_key: &str) -> Option<u64> {
+        self.policy_versions
+            .values()
+            .filter(|pv| pv.id.scope_key == scope_key)
+            .map(|pv| pv.id.version)
+            .max()
+    }
 }
 
 impl Default for State {

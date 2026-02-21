@@ -484,7 +484,8 @@ pub fn run(cli: Cli) -> Result<()> {
 
             let now = metering_chain::current_timestamp().max(0) as u64;
             const DEFAULT_MAX_AGE: u64 = 300;
-            let live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+            let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+            live_ctx.next_tx_id = Some(next_tx_id);
 
             // Validate transaction
             let cost_opt = metering_chain::tx::validation::validate(
@@ -711,16 +712,16 @@ pub fn run(cli: Cli) -> Result<()> {
                 signer,
                 allow_unsigned,
             } => {
-                let (_, tip_next_tx_id) = load_or_create_state(&storage, &config)?;
+                let (mut state, mut next_tx_id) = load_or_create_state(&storage, &config)?;
                 if to_tx_id <= from_tx_id {
                     return Err(Error::InvalidTransaction(
                         "to_tx_id must be greater than from_tx_id".to_string(),
                     ));
                 }
-                if to_tx_id > tip_next_tx_id {
+                if to_tx_id > next_tx_id {
                     return Err(Error::InvalidTransaction(format!(
                         "to_tx_id {} exceeds log tip (next tx id {}); window must be within applied txs",
-                        to_tx_id, tip_next_tx_id
+                        to_tx_id, next_tx_id
                     )));
                 }
                 let state_to = replay::replay_up_to(&storage, to_tx_id)?;
@@ -739,9 +740,16 @@ pub fn run(cli: Cli) -> Result<()> {
                         "No usage in window: gross_spent is 0".to_string(),
                     ));
                 }
-                let operator_share = (gross_spent * 90) / 100;
-                let protocol_fee = gross_spent.saturating_sub(operator_share);
-                let reserve_locked = 0u64;
+                let (operator_share, protocol_fee, reserve_locked) =
+                    if let Some(policy) = state.resolve_policy(&owner, &service_id, next_tx_id) {
+                        let (op, proto) = policy.config.fee_policy.split(gross_spent);
+                        let res = policy.config.reserve_from_gross(gross_spent);
+                        (op, proto, res)
+                    } else {
+                        let op = (gross_spent * 90) / 100;
+                        let proto = gross_spent.saturating_sub(op);
+                        (op, proto, 0u64)
+                    };
                 let txs_in_window = replay::load_tx_slice(&storage, from_tx_id)?;
                 let txs_slice: Vec<_> = txs_in_window
                     .into_iter()
@@ -749,7 +757,6 @@ pub fn run(cli: Cli) -> Result<()> {
                     .collect();
                 let evidence_hash = evidence::tx_slice_hash(&txs_slice);
 
-                let (mut state, mut next_tx_id) = load_or_create_state(&storage, &config)?;
                 let signer_nonce = state.get_account(&signer).map(|a| a.nonce()).unwrap_or(0);
 
                 let tx_propose = SignedTx::new(

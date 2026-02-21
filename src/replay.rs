@@ -16,7 +16,6 @@ use crate::wallet;
 /// - Uses `ValidationContext::replay()` and `None` for minters (replay mode).
 /// - Verifies signatures for signed txs to ensure log integrity.
 pub fn replay_to_tip<S: Storage>(storage: &S) -> Result<(State, u64)> {
-    let replay_ctx = ValidationContext::replay();
     match storage.load_state()? {
         Some((snapshot_state, next_tx_id)) => {
             let txs_to_apply = storage.load_txs_from(next_tx_id)?;
@@ -26,7 +25,8 @@ pub fn replay_to_tip<S: Storage>(storage: &S) -> Result<(State, u64)> {
                 if tx.signature.is_some() {
                     wallet::verify_signature(&tx)?;
                 }
-                current_state = apply(&current_state, &tx, &replay_ctx, None)?;
+                let ctx = ValidationContext::replay_for_tx(next_id);
+                current_state = apply(&current_state, &tx, &ctx, None)?;
                 next_id += 1;
             }
             Ok((current_state, next_id))
@@ -39,7 +39,8 @@ pub fn replay_to_tip<S: Storage>(storage: &S) -> Result<(State, u64)> {
                 if tx.signature.is_some() {
                     wallet::verify_signature(&tx)?;
                 }
-                current_state = apply(&current_state, &tx, &replay_ctx, None)?;
+                let ctx = ValidationContext::replay_for_tx(next_id);
+                current_state = apply(&current_state, &tx, &ctx, None)?;
                 next_id += 1;
             }
             Ok((current_state, next_id))
@@ -57,13 +58,13 @@ pub fn load_tx_slice<S: Storage>(storage: &S, from_tx_id: u64) -> Result<Vec<Sig
 pub fn replay_up_to<S: Storage>(storage: &S, up_to_tx_id: u64) -> Result<State> {
     let all_txs = storage.load_txs_from(0)?;
     let to_apply: Vec<_> = all_txs.into_iter().take(up_to_tx_id as usize).collect();
-    let replay_ctx = ValidationContext::replay();
     let mut state = State::new();
-    for tx in to_apply {
+    for (i, tx) in to_apply.into_iter().enumerate() {
         if tx.signature.is_some() {
             wallet::verify_signature(&tx)?;
         }
-        state = apply(&state, &tx, &replay_ctx, None)?;
+        let ctx = ValidationContext::replay_for_tx(i as u64);
+        state = apply(&state, &tx, &ctx, None)?;
     }
     Ok(state)
 }

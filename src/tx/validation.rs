@@ -41,6 +41,17 @@ impl ValidationContext {
             next_tx_id: None,
         }
     }
+
+    /// Replay context for applying the tx at index `tx_index`, so G3 policy binding and finalized_at are reconstructed.
+    /// Sets next_tx_id = tx_index and now = 0 (deterministic replay time for FinalizeSettlement/OpenDispute).
+    pub fn replay_for_tx(tx_index: u64) -> Self {
+        ValidationContext {
+            mode: ValidationMode::Replay,
+            now: Some(0),
+            max_age: None,
+            next_tx_id: Some(tx_index),
+        }
+    }
 }
 
 /// Canonical ability name for Consume (delegation scope). Proof scoped to this may only be used for Consume.
@@ -992,6 +1003,10 @@ fn validate_publish_policy_version(
         version: *version,
     };
     if state.get_policy_version(&id).is_some() {
+        return Err(Error::PolicyVersionConflict);
+    }
+    let latest = state.latest_policy_version_for_scope(&scope_key);
+    if latest.map_or(false, |v| *version <= v) {
         return Err(Error::PolicyVersionConflict);
     }
     if let Some(next) = ctx.next_tx_id {

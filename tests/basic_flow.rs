@@ -3546,3 +3546,199 @@ fn test_g3_retroactive_policy_forbidden() {
         res
     );
 }
+
+/// G3: Version must be strictly greater than latest for scope (monotonic).
+#[test]
+fn test_g3_publish_non_monotonic_version_rejected() {
+    use metering_chain::state::{PolicyConfig, PolicyScope};
+    use metering_chain::tx::validation::ValidationContext;
+
+    let minters = get_authorized_minters();
+    let mut state = State::new();
+    let mut ctx = ValidationContext::replay();
+    ctx.next_tx_id = Some(1);
+    let cfg = PolicyConfig {
+        fee_policy: metering_chain::state::FeePolicy {
+            operator_share_bps: 9000,
+            protocol_fee_bps: 1000,
+        },
+        reserve_policy: metering_chain::state::ReservePolicy::None,
+        dispute_policy: metering_chain::state::DisputePolicy {
+            dispute_window_secs: 3600,
+        },
+    };
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            0,
+            Transaction::PublishPolicyVersion {
+                scope: PolicyScope::Global,
+                version: 1,
+                effective_from_tx_id: 1,
+                config: cfg.clone(),
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+    ctx.next_tx_id = Some(2);
+    let res = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            1,
+            Transaction::PublishPolicyVersion {
+                scope: PolicyScope::Global,
+                version: 0,
+                effective_from_tx_id: 2,
+                config: cfg,
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    );
+    assert!(
+        matches!(res, Err(Error::PolicyVersionConflict)),
+        "expected PolicyVersionConflict (non-monotonic version), got {:?}",
+        res
+    );
+}
+
+/// G3: Replaying same tx sequence yields identical policy selection and settlement totals.
+#[test]
+fn test_g3_replay_reconstructs_identical_policy_selection() {
+    use metering_chain::evidence;
+    use metering_chain::state::{PolicyConfig, PolicyScope, SettlementId};
+    use metering_chain::tx::validation::ValidationContext;
+
+    let minters = get_authorized_minters();
+    let rctx = replay_ctx();
+    let sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w1".to_string());
+    let ev_hash = evidence::evidence_hash(b"alice:storage:w1:0:3");
+
+    let cfg = PolicyConfig {
+        fee_policy: metering_chain::state::FeePolicy {
+            operator_share_bps: 9000,
+            protocol_fee_bps: 1000,
+        },
+        reserve_policy: metering_chain::state::ReservePolicy::None,
+        dispute_policy: metering_chain::state::DisputePolicy {
+            dispute_window_secs: 3600,
+        },
+    };
+
+    fn run_sequence(
+        minters: &std::collections::HashSet<String>,
+        rctx: &ValidationContext,
+        cfg: &PolicyConfig,
+        ev_hash: &str,
+        gross_spent: u64,
+    ) -> State {
+        let mut state = State::new();
+        state = apply(
+            &state,
+            &SignedTx::new(
+                "authority".to_string(),
+                0,
+                Transaction::Mint {
+                    to: "alice".to_string(),
+                    amount: 1000,
+                },
+            ),
+            rctx,
+            Some(minters),
+        )
+        .unwrap();
+        state = apply(
+            &state,
+            &SignedTx::new(
+                "alice".to_string(),
+                0,
+                Transaction::OpenMeter {
+                    owner: "alice".to_string(),
+                    service_id: "storage".to_string(),
+                    deposit: 100,
+                },
+            ),
+            rctx,
+            Some(minters),
+        )
+        .unwrap();
+        state = apply(
+            &state,
+            &SignedTx::new(
+                "alice".to_string(),
+                1,
+                Transaction::Consume {
+                    owner: "alice".to_string(),
+                    service_id: "storage".to_string(),
+                    units: 10,
+                    pricing: Pricing::UnitPrice(5),
+                },
+            ),
+            rctx,
+            Some(minters),
+        )
+        .unwrap();
+        let mut ctx = ValidationContext::replay();
+        ctx.next_tx_id = Some(3);
+        let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+        state = apply(
+            &state,
+            &SignedTx::new(
+                "authority".to_string(),
+                auth_n,
+                Transaction::PublishPolicyVersion {
+                    scope: PolicyScope::Global,
+                    version: 1,
+                    effective_from_tx_id: 3,
+                    config: cfg.clone(),
+                },
+            ),
+            &ctx,
+            Some(minters),
+        )
+        .unwrap();
+        ctx.next_tx_id = Some(4);
+        let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+        state = apply(
+            &state,
+            &SignedTx::new(
+                "authority".to_string(),
+                auth_n,
+                Transaction::ProposeSettlement {
+                    owner: "alice".to_string(),
+                    service_id: "storage".to_string(),
+                    window_id: "w1".to_string(),
+                    from_tx_id: 0,
+                    to_tx_id: 3,
+                    gross_spent,
+                    operator_share: 45,
+                    protocol_fee: 5,
+                    reserve_locked: 0,
+                    evidence_hash: ev_hash.to_string(),
+                },
+            ),
+            &ctx,
+            Some(minters),
+        )
+        .unwrap();
+        state
+    }
+
+    let ev_hash_s = ev_hash.as_str();
+    let state1 = run_sequence(&minters, &rctx, &cfg, ev_hash_s, 50);
+    let state2 = run_sequence(&minters, &rctx, &cfg, ev_hash_s, 50);
+
+    let s1 = state1.get_settlement(&sid).unwrap();
+    let s2 = state2.get_settlement(&sid).unwrap();
+
+    assert_eq!(s1.policy_scope_key, s2.policy_scope_key);
+    assert_eq!(s1.policy_version, s2.policy_version);
+    assert_eq!(s1.gross_spent, s2.gross_spent);
+    assert_eq!(s1.operator_share, s2.operator_share);
+    assert_eq!(s1.protocol_fee, s2.protocol_fee);
+    assert_eq!(s1.dispute_window_secs, s2.dispute_window_secs);
+}
