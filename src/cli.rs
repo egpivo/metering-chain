@@ -3,7 +3,7 @@ use metering_chain::config::Config;
 use metering_chain::error::{Error, Result};
 use metering_chain::evidence;
 use metering_chain::replay;
-use metering_chain::state::{apply, SettlementId, State};
+use metering_chain::state::{SettlementId, State};
 use metering_chain::storage::{FileStorage, Storage};
 use metering_chain::tx::validation::ValidationContext;
 use metering_chain::tx::{DisputeVerdict, SignedTx, Transaction};
@@ -513,40 +513,6 @@ pub fn run(cli: Cli) -> Result<()> {
                 Some(&minters),
             )?;
 
-            // G4: For ResolveDispute, enforce node-side replay — recompute from storage and require tx payload matches.
-            if let Transaction::ResolveDispute {
-                owner,
-                service_id,
-                window_id,
-                evidence_hash: tx_evidence_hash,
-                replay_hash: tx_replay_hash,
-                replay_summary: tx_replay_summary,
-                ..
-            } = &signed_tx.kind
-            {
-                let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
-                let s = state.get_settlement(&sid).ok_or(Error::SettlementNotFound)?;
-                let (node_summary, node_evidence_hash) = replay::replay_slice_to_summary(
-                    &storage,
-                    s.from_tx_id,
-                    s.to_tx_id,
-                    owner,
-                    service_id,
-                    s.operator_share,
-                    s.protocol_fee,
-                    s.reserve_locked,
-                )?;
-                if node_evidence_hash != s.evidence_hash {
-                    return Err(Error::ReplayMismatch);
-                }
-                if &node_summary != tx_replay_summary || node_summary.replay_hash() != *tx_replay_hash {
-                    return Err(Error::ReplayMismatch);
-                }
-                if *tx_evidence_hash != s.evidence_hash {
-                    return Err(Error::ReplayMismatch);
-                }
-            }
-
             if dry_run {
                 println!("Transaction is valid");
                 if let Some(cost) = cost_opt {
@@ -555,8 +521,8 @@ pub fn run(cli: Cli) -> Result<()> {
                 return Ok(());
             }
 
-            // Apply transaction
-            state = apply(&state, &signed_tx, &live_ctx, Some(&minters))?;
+            // Apply transaction (G4: ResolveDispute verified via apply_with_replay_verifier)
+            state = replay::apply_with_replay_verifier(&storage, &state, &signed_tx, &live_ctx, Some(&minters))?;
             next_tx_id += 1;
 
             // Persist transaction and state
@@ -846,7 +812,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 const DEFAULT_MAX_AGE: u64 = 300;
                 let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
                 live_ctx.next_tx_id = Some(next_tx_id);
-                state = apply(&state, &signed_tx, &live_ctx, Some(&minters))?;
+                state = replay::apply_with_replay_verifier(&storage, &state, &signed_tx, &live_ctx, Some(&minters))?;
                 next_tx_id += 1;
                 storage.append_tx(&signed_tx)?;
                 storage.persist_state(&state, next_tx_id)?;
@@ -902,7 +868,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 const DEFAULT_MAX_AGE: u64 = 300;
                 let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
                 live_ctx.next_tx_id = Some(next_tx_id);
-                state = apply(&state, &signed_tx, &live_ctx, Some(&minters))?;
+                state = replay::apply_with_replay_verifier(&storage, &state, &signed_tx, &live_ctx, Some(&minters))?;
                 next_tx_id += 1;
                 storage.append_tx(&signed_tx)?;
                 storage.persist_state(&state, next_tx_id)?;
@@ -956,7 +922,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 let now = metering_chain::current_timestamp().max(0) as u64;
                 const DEFAULT_MAX_AGE: u64 = 300;
                 let live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
-                state = apply(&state, &signed_tx, &live_ctx, None)?;
+                state = replay::apply_with_replay_verifier(&storage, &state, &signed_tx, &live_ctx, None)?;
                 next_tx_id += 1;
                 storage.append_tx(&signed_tx)?;
                 storage.persist_state(&state, next_tx_id)?;
@@ -1021,7 +987,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 let now = metering_chain::current_timestamp().max(0) as u64;
                 const DEFAULT_MAX_AGE: u64 = 300;
                 let live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
-                state = apply(&state, &signed_tx, &live_ctx, Some(&minters))?;
+                state = replay::apply_with_replay_verifier(&storage, &state, &signed_tx, &live_ctx, Some(&minters))?;
                 next_tx_id += 1;
                 storage.append_tx(&signed_tx)?;
                 storage.persist_state(&state, next_tx_id)?;
@@ -1078,7 +1044,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 let now = metering_chain::current_timestamp().max(0) as u64;
                 const DEFAULT_MAX_AGE: u64 = 300;
                 let live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
-                state = apply(&state, &signed_tx, &live_ctx, Some(&minters))?;
+                state = replay::apply_with_replay_verifier(&storage, &state, &signed_tx, &live_ctx, Some(&minters))?;
                 next_tx_id += 1;
                 storage.append_tx(&signed_tx)?;
                 storage.persist_state(&state, next_tx_id)?;
@@ -1155,7 +1121,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 const DEFAULT_MAX_AGE: u64 = 300;
                 let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
                 live_ctx.next_tx_id = Some(next_tx_id);
-                state = apply(&state, &signed_tx, &live_ctx, Some(&minters))?;
+                state = replay::apply_with_replay_verifier(&storage, &state, &signed_tx, &live_ctx, Some(&minters))?;
                 next_tx_id += 1;
                 storage.append_tx(&signed_tx)?;
                 storage.persist_state(&state, next_tx_id)?;
@@ -1369,7 +1335,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     const DEFAULT_MAX_AGE: u64 = 300;
                     let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
                     live_ctx.next_tx_id = Some(next_tx_id);
-                    state = apply(&state, &signed_tx, &live_ctx, Some(&minters))?;
+                    state = replay::apply_with_replay_verifier(&storage, &state, &signed_tx, &live_ctx, Some(&minters))?;
                     next_tx_id += 1;
                     storage.append_tx(&signed_tx)?;
                     storage.persist_state(&state, next_tx_id)?;

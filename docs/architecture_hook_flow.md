@@ -157,11 +157,13 @@ flowchart TB
 
 G1 (Settlement) and G2 (Dispute) core flows are implemented. **G4 (Evidence finality)** is implemented: ResolveDispute is replay-justified; evidence bundle and `validate_shape()` are used in the resolve path; settlement window and `evidence_hash` are bound in the tx and validated.
 
-- **ResolveDispute** “deterministic replay result must justify verdict”: implemented — validation and apply require `replay_summary.from_tx_id`/`to_tx_id` equal to settlement window, `evidence_hash` equal to settlement, `EvidenceBundle.validate_shape()`, and settlement totals vs replay summary. **Node-side replay**: when applying a ResolveDispute via the **Apply** command (e.g. submitted tx from file), the CLI recomputes the replay from storage (`replay_slice_to_summary`) and rejects with `ReplayMismatch` unless the tx's replay summary and hash match the node's result; this prevents "submit matching summary" without actual replay.
+- **ResolveDispute** “deterministic replay result must justify verdict”: implemented — validation and apply require `replay_summary.from_tx_id`/`to_tx_id` equal to settlement window, `evidence_hash` equal to settlement, `EvidenceBundle.validate_shape()`, and settlement totals vs replay summary. **Node-side replay**: the library provides `replay::apply_with_replay_verifier(storage, state, tx, ctx, minters)` which runs `verify_resolve_dispute_replay` then `apply`. **All CLI write paths** use this wrapper so ResolveDispute is always verified at the execution layer; any future API/worker that persists state should call `apply_with_replay_verifier` (not `apply` directly) so they cannot bypass the check.
 - **Auditability** “evidence bundle + replay hash”: implemented — settlement stores `evidence_hash` and tx range; after resolve, dispute stores `resolution_audit` (replay_hash, replay_summary); `get_evidence_bundle(settlement_id)` and CLI `settlement show` / `dispute show` / `evidence show` expose G4 fields.
 
 **Implemented**:
 
 - **OpenDispute** “must be within dispute window”: enforced in validation when settlement has `dispute_window_secs` and `finalized_at` and context provides `now` (live); rejects with “outside dispute window” if `now > finalized_at + dispute_window_secs`.
+
+**Developer contract (new write entry points):** Any new code path that applies transactions and persists state (e.g. API server, worker, script) **must** call `replay::apply_with_replay_verifier(storage, state, tx, ctx, minters)` — not `state::apply` — so that ResolveDispute is always verified against the tx log. See doc comment on `replay::apply_with_replay_verifier`.
 
 **Still deferred** (see `.local/phase4_g2_tasks.md`): any remaining 4C policy/UX items.
