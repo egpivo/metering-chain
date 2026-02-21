@@ -36,10 +36,10 @@ def main() -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     start = date(2026, 1, 1)
-    end = date(2026, 2, 10)  # through Feb 10
+    end = date(2026, 2, 22)  # through Feb 22
     service_id = "helium-iot"
-    num_owners = 60
-    windows_per_day = 45  # (day, owner) combos per day -> ~41 * 45 = 1845 windows
+    num_owners = 80
+    windows_per_day = 85  # (day, owner) combos per day -> ~53 * 85 ≈ 4500 windows
 
     windows: list[dict] = []
     tx_cursor = 0
