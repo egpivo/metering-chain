@@ -6,12 +6,14 @@ interface EvidenceCompareCardProps {
   /** Recorded totals from settlement (for comparison) */
   recorded?: { gross_spent: number; operator_share: number; protocol_fee: number; reserve_locked: number };
   mismatch?: boolean;
+  /** Optional class for embedding in narrow panels (e.g. demo Block 4) */
+  className?: string;
 }
 
-export function EvidenceCompareCard({ bundle, recorded, mismatch }: EvidenceCompareCardProps) {
+export function EvidenceCompareCard({ bundle, recorded, mismatch, className }: EvidenceCompareCardProps) {
   const r = bundle.replay_summary;
   return (
-    <div className="card">
+    <div className={className ? `card ${className}` : 'card'}>
       <h3>Evidence & Replay (G4)</h3>
       <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 'var(--space-2) var(--space-4)' }}>
         <dt style={{ color: 'var(--color-text-muted)' }}>Settlement</dt>
@@ -26,7 +28,7 @@ export function EvidenceCompareCard({ bundle, recorded, mismatch }: EvidenceComp
       {r && (
         <>
           <h4 style={{ margin: 'var(--space-4) 0 var(--space-2)', fontSize: 'var(--text-sm)' }}>Replay summary</h4>
-          <table className="data-table" style={{ maxWidth: 400 }}>
+          <table className="data-table evidence-compare-table">
             <tbody>
               <CompareRow label="gross_spent" replay={r.gross_spent} recorded={recorded?.gross_spent} mismatch={mismatch} />
               <CompareRow label="operator_share" replay={r.operator_share} recorded={recorded?.operator_share} mismatch={mismatch} />

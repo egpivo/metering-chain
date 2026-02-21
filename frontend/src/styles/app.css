@@ -241,34 +241,42 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 
 /* Demo page: two columns; stack on narrow so inline style does not override */
+.demo-page h1 {
+  font-size: 2.2rem;
+  line-height: 1.15;
+}
+.demo-page > p {
+  font-size: var(--text-lg);
+}
 .demo-pipeline {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-3);
-  margin-bottom: var(--space-4);
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
 }
 .demo-stage-card {
   background: linear-gradient(180deg, var(--color-surface-elevated), var(--color-surface));
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  padding: var(--space-3);
+  padding: var(--space-2) var(--space-3);
 }
 .demo-stage-card h4 {
-  margin: 0 0 var(--space-1);
-  font-size: var(--text-base);
+  margin: 0 0 6px;
+  font-size: var(--text-lg);
 }
 .demo-stage-card p {
-  margin: 0 0 var(--space-2);
+  margin: 0 0 6px;
   color: var(--color-text-muted);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
+  line-height: 1.35;
 }
 .demo-stage-card strong {
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
 }
 .demo-stage-index {
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   border-radius: 999px;
   border: 1px solid var(--color-border);
   font-size: var(--text-xs);
@@ -278,15 +286,65 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   margin-bottom: var(--space-2);
   color: var(--color-text-muted);
 }
+.demo-controls-wrap .card {
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.demo-controls-wrap h3 {
+  margin-bottom: var(--space-2);
+}
+.demo-controls-wrap input,
+.demo-controls-wrap select {
+  min-width: 128px;
+  padding: 7px 10px;
+}
 .demo-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 400px;
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 520px);
   gap: var(--space-4);
 }
 /* Keep table in left column: allow shrink + horizontal scroll so columns don't spill into right panel */
 .demo-layout > div:first-child {
   min-width: 0;
   overflow-x: auto;
+}
+/* Right panel (Block 4): enough width, wrap long text, no overflow clip */
+.demo-layout > div:last-child {
+  min-width: 0;
+  overflow: visible;
+  overflow-wrap: break-word;
+}
+.demo-layout > div:last-child .card {
+  min-width: 0;
+  overflow: visible;
+}
+.demo-layout .card .evidence-panel-header {
+  word-break: break-all;
+  font-size: var(--text-sm);
+}
+.demo-layout .card .evidence-panel-header strong {
+  font-weight: 600;
+}
+/* Evidence & Replay card inside Block 4: no double border, table and text use full width */
+.demo-layout .card.evidence-compare-card {
+  border: none;
+  padding: 0;
+  margin-top: var(--space-3);
+  box-shadow: none;
+  background: transparent;
+}
+.demo-layout .card.evidence-compare-card .mono,
+.demo-layout .card.evidence-compare-card td {
+  word-break: break-all;
+  font-size: var(--text-sm);
+}
+.demo-layout .card.evidence-compare-card table {
+  max-width: 100%;
+  table-layout: fixed;
+}
+.demo-layout .card.evidence-compare-card dd {
+  word-break: break-all;
+  min-width: 0;
 }
 @media (max-width: 900px) {
   .demo-pipeline {

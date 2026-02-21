@@ -106,6 +106,25 @@ export function DemoPhase4Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount with default controls
   }, []);
 
+  useEffect(() => {
+    if (windows.length === 0) {
+      if (state.selected_window_id) {
+        setState((s) => ({ ...s, selected_window_id: undefined }));
+      }
+      return;
+    }
+    const hasSelected = state.selected_window_id
+      ? windows.some((w) => `${w.owner}:${w.service_id}:${w.window_id}` === state.selected_window_id)
+      : false;
+    if (!hasSelected) {
+      const first = windows[0]!;
+      setState((s) => ({
+        ...s,
+        selected_window_id: `${first.owner}:${first.service_id}:${first.window_id}`,
+      }));
+    }
+  }, [windows, state.selected_window_id]);
+
   const selected = state.selected_window_id
     ? windows.find((w) => `${w.owner}:${w.service_id}:${w.window_id}` === state.selected_window_id)
     : null;
@@ -186,7 +205,7 @@ export function DemoPhase4Page() {
   ];
 
   return (
-    <div>
+    <div className="demo-page">
       <h1 style={{ marginBottom: 'var(--space-2)' }}>DePIN Helium IOT Settlement Control Plane</h1>
       <p style={{ color: 'var(--color-text-muted)', marginBottom: 'var(--space-4)' }}>
         Raw transfer snapshots enter policy projection, become settlement windows, then pass replay evidence gates before dispute resolution.
@@ -219,17 +238,19 @@ export function DemoPhase4Page() {
           <strong>M:{compareStats.match} X:{compareStats.mismatch} ?: {compareStats.missing}</strong>
         </div>
       </div>
-      <DemoControlPanel
-        state={state}
-        onControlsChange={(patch) =>
-          setState((s) => ({ ...s, controls: { ...s.controls, ...patch } }))
-        }
-        onRecompute={recompute}
-        byokEnabled={DEMO_BYOK_ENABLED}
-        onModeChange={(mode) => setState((s) => ({ ...s, mode }))}
-        byokKey={byokKey}
-        onByokKeyChange={setByokKey}
-      />
+      <div className="demo-controls-wrap">
+        <DemoControlPanel
+          state={state}
+          onControlsChange={(patch) =>
+            setState((s) => ({ ...s, controls: { ...s.controls, ...patch } }))
+          }
+          onRecompute={recompute}
+          byokEnabled={DEMO_BYOK_ENABLED}
+          onModeChange={(mode) => setState((s) => ({ ...s, mode }))}
+          byokKey={byokKey}
+          onByokKeyChange={setByokKey}
+        />
+      </div>
       {state.last_error && (
         <ErrorBanner
           error={{
@@ -266,11 +287,15 @@ export function DemoPhase4Page() {
         <div>
           <div className="card">
             <h3>4. Integrity & Evidence</h3>
-            {!selected ? (
+            {!selected && windows.length === 0 ? (
+              <p style={{ color: 'var(--color-text-muted)' }}>
+                No windows match current filters. Adjust controls and Recompute.
+              </p>
+            ) : !selected ? (
               <p style={{ color: 'var(--color-text-muted)' }}>Select a window.</p>
             ) : (
               <>
-                <p>
+                <p className="evidence-panel-header" title={`${selected.owner}:${selected.service_id}:${selected.window_id}`}>
                   <strong>{selected.owner}</strong> / {selected.service_id} / {selected.window_id}
                 </p>
                 <p style={{ color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
@@ -281,6 +306,7 @@ export function DemoPhase4Page() {
                 </p>
                 {bundle && (
                   <EvidenceCompareCard
+                    className="evidence-compare-card"
                     bundle={bundle}
                     recorded={{
                       gross_spent: selected.gross_spent,

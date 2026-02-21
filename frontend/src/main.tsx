@@ -9,10 +9,11 @@ import './styles/app.css';
 
 const useMock = import.meta.env.VITE_USE_MOCK_ADAPTER === 'true';
 const rootAdapter = useMock ? MockAdapter : SnapshotFrontendAdapter;
+const basename = (import.meta.env.BASE_URL ?? '/').replace(/\/$/, '') || undefined;
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <BrowserRouter basename={basename} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AdapterProvider adapter={rootAdapter}>
         <App />
       </AdapterProvider>
