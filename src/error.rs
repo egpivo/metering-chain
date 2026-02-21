@@ -40,6 +40,9 @@ impl Error {
             PolicyNotFound => "POLICY_NOT_FOUND",
             PolicyNotEffective => "POLICY_NOT_EFFECTIVE",
             RetroactivePolicyForbidden => "RETROACTIVE_POLICY_FORBIDDEN",
+            InvalidEvidenceBundle => "INVALID_EVIDENCE_BUNDLE",
+            ReplayMismatch => "REPLAY_MISMATCH",
+            EvidenceNotFound => "EVIDENCE_NOT_FOUND",
         }
     }
 }
@@ -139,6 +142,14 @@ pub enum Error {
     PolicyNotEffective,
     #[error("Retroactive policy forbidden (effective_from_tx_id < next_tx_id)")]
     RetroactivePolicyForbidden,
+
+    // Phase 4 G4: Evidence / replay
+    #[error("Invalid evidence bundle (shape or required fields)")]
+    InvalidEvidenceBundle,
+    #[error("Replay result does not match settlement totals or replay_hash")]
+    ReplayMismatch,
+    #[error("Evidence or bundle not found")]
+    EvidenceNotFound,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

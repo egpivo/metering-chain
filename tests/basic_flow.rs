@@ -2643,7 +2643,18 @@ fn test_g2_dispute_freezes_payout_then_resolve_dismissed_allows_pay() {
         res
     );
 
-    // 5. Resolve dispute Dismissed → settlement reverted to Finalized
+    // 5. Resolve dispute Dismissed → settlement reverted to Finalized (G4: replay evidence)
+    let s = state.get_settlement(&sid).unwrap();
+    let replay_summary = metering_chain::evidence::ReplaySummary::new(
+        s.from_tx_id,
+        s.to_tx_id,
+        s.to_tx_id.saturating_sub(s.from_tx_id),
+        s.gross_spent,
+        s.operator_share,
+        s.protocol_fee,
+        s.reserve_locked,
+    );
+    let replay_hash = replay_summary.replay_hash();
     let auth_n = state
         .get_account("authority")
         .map(|a| a.nonce())
@@ -2658,6 +2669,8 @@ fn test_g2_dispute_freezes_payout_then_resolve_dismissed_allows_pay() {
                 service_id: "storage".to_string(),
                 window_id: "w1".to_string(),
                 verdict: DisputeVerdict::Dismissed,
+                replay_hash: replay_hash.clone(),
+                replay_summary: replay_summary.clone(),
             },
         ),
         &rctx,
@@ -2833,7 +2846,18 @@ fn test_g2_resolve_dispute_upheld_keeps_payout_frozen() {
     .unwrap();
     let did = DisputeId::new(&sid);
 
-    // 3. Resolve with Upheld → dispute closed, settlement stays Disputed
+    // 3. Resolve with Upheld → dispute closed, settlement stays Disputed (G4: replay evidence)
+    let s = state.get_settlement(&sid).unwrap();
+    let replay_summary = metering_chain::evidence::ReplaySummary::new(
+        s.from_tx_id,
+        s.to_tx_id,
+        s.to_tx_id.saturating_sub(s.from_tx_id),
+        s.gross_spent,
+        s.operator_share,
+        s.protocol_fee,
+        s.reserve_locked,
+    );
+    let replay_hash = replay_summary.replay_hash();
     let auth_n = state
         .get_account("authority")
         .map(|a| a.nonce())
@@ -2848,6 +2872,8 @@ fn test_g2_resolve_dispute_upheld_keeps_payout_frozen() {
                 service_id: "storage".to_string(),
                 window_id: "w1".to_string(),
                 verdict: DisputeVerdict::Upheld,
+                replay_hash: replay_hash.clone(),
+                replay_summary: replay_summary.clone(),
             },
         ),
         &rctx,
@@ -3741,4 +3767,446 @@ fn test_g3_replay_reconstructs_identical_policy_selection() {
     assert_eq!(s1.operator_share, s2.operator_share);
     assert_eq!(s1.protocol_fee, s2.protocol_fee);
     assert_eq!(s1.dispute_window_secs, s2.dispute_window_secs);
+}
+
+// --- G4 (Evidence Finality) ---
+
+/// G4: ResolveDispute with empty replay_hash → InvalidEvidenceBundle.
+#[test]
+fn test_g4_resolve_dispute_requires_valid_evidence_bundle() {
+    use metering_chain::evidence::ReplaySummary;
+    use metering_chain::state::SettlementId;
+
+    let minters = get_authorized_minters();
+    let mut state = State::new();
+    let rctx = replay_ctx();
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            0,
+            Transaction::Mint {
+                to: "alice".to_string(),
+                amount: 1000,
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "alice".to_string(),
+            0,
+            Transaction::OpenMeter {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                deposit: 100,
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "alice".to_string(),
+            1,
+            Transaction::Consume {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                units: 10,
+                pricing: Pricing::UnitPrice(5),
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    let _sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w1".to_string());
+    let ev_hash = metering_chain::evidence::evidence_hash(b"alice:storage:w1:0:3");
+    let mut ctx = metering_chain::tx::validation::ValidationContext::replay();
+    ctx.next_tx_id = Some(4);
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::ProposeSettlement {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                from_tx_id: 0,
+                to_tx_id: 3,
+                gross_spent: 50,
+                operator_share: 45,
+                protocol_fee: 5,
+                reserve_locked: 0,
+                evidence_hash: ev_hash,
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+    ctx.next_tx_id = Some(5);
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::FinalizeSettlement {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::OpenDispute {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                reason_code: "test".to_string(),
+                evidence_hash: String::new(),
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+    let summary = ReplaySummary::new(0, 3, 3, 50, 45, 5, 0);
+    let res = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            state.get_account("authority").map(|a| a.nonce()).unwrap_or(0),
+            Transaction::ResolveDispute {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                verdict: metering_chain::tx::DisputeVerdict::Dismissed,
+                replay_hash: String::new(),
+                replay_summary: summary,
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    );
+    assert!(
+        matches!(res, Err(Error::InvalidEvidenceBundle)),
+        "expected InvalidEvidenceBundle, got {:?}",
+        res
+    );
+}
+
+/// G4: ResolveDispute with replay_summary totals not matching settlement → ReplayMismatch.
+#[test]
+fn test_g4_resolve_dispute_rejects_replay_mismatch() {
+    use metering_chain::evidence::ReplaySummary;
+    use metering_chain::state::SettlementId;
+
+    let minters = get_authorized_minters();
+    let mut state = State::new();
+    let rctx = replay_ctx();
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            0,
+            Transaction::Mint {
+                to: "alice".to_string(),
+                amount: 1000,
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "alice".to_string(),
+            0,
+            Transaction::OpenMeter {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                deposit: 100,
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "alice".to_string(),
+            1,
+            Transaction::Consume {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                units: 10,
+                pricing: Pricing::UnitPrice(5),
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    let _sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w1".to_string());
+    let ev_hash = metering_chain::evidence::evidence_hash(b"alice:storage:w1:0:3");
+    let mut ctx = metering_chain::tx::validation::ValidationContext::replay();
+    ctx.next_tx_id = Some(4);
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::ProposeSettlement {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                from_tx_id: 0,
+                to_tx_id: 3,
+                gross_spent: 50,
+                operator_share: 45,
+                protocol_fee: 5,
+                reserve_locked: 0,
+                evidence_hash: ev_hash,
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+    ctx.next_tx_id = Some(5);
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::FinalizeSettlement {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::OpenDispute {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                reason_code: "test".to_string(),
+                evidence_hash: String::new(),
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+    let wrong_summary = ReplaySummary::new(0, 3, 3, 99, 45, 5, 0);
+    let replay_hash = wrong_summary.replay_hash();
+    let res = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            state.get_account("authority").map(|a| a.nonce()).unwrap_or(0),
+            Transaction::ResolveDispute {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                verdict: metering_chain::tx::DisputeVerdict::Dismissed,
+                replay_hash: replay_hash.clone(),
+                replay_summary: wrong_summary,
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    );
+    assert!(
+        matches!(res, Err(Error::ReplayMismatch)),
+        "expected ReplayMismatch, got {:?}",
+        res
+    );
+}
+
+/// G4: ResolveDispute with matching replay stores resolution_audit on dispute.
+#[test]
+fn test_g4_resolve_dispute_accepts_matching_replay() {
+    use metering_chain::evidence::ReplaySummary;
+    use metering_chain::state::SettlementId;
+
+    let minters = get_authorized_minters();
+    let mut state = State::new();
+    let rctx = replay_ctx();
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            0,
+            Transaction::Mint {
+                to: "alice".to_string(),
+                amount: 1000,
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "alice".to_string(),
+            0,
+            Transaction::OpenMeter {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                deposit: 100,
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "alice".to_string(),
+            1,
+            Transaction::Consume {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                units: 10,
+                pricing: Pricing::UnitPrice(5),
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    let sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w1".to_string());
+    let ev_hash = metering_chain::evidence::evidence_hash(b"alice:storage:w1:0:3");
+    let mut ctx = metering_chain::tx::validation::ValidationContext::replay();
+    ctx.next_tx_id = Some(4);
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::ProposeSettlement {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                from_tx_id: 0,
+                to_tx_id: 3,
+                gross_spent: 50,
+                operator_share: 45,
+                protocol_fee: 5,
+                reserve_locked: 0,
+                evidence_hash: ev_hash.clone(),
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+    ctx.next_tx_id = Some(5);
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::FinalizeSettlement {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::OpenDispute {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                reason_code: "test".to_string(),
+                evidence_hash: String::new(),
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+    let s = state.get_settlement(&sid).unwrap();
+    let replay_summary = ReplaySummary::new(
+        s.from_tx_id,
+        s.to_tx_id,
+        s.to_tx_id.saturating_sub(s.from_tx_id),
+        s.gross_spent,
+        s.operator_share,
+        s.protocol_fee,
+        s.reserve_locked,
+    );
+    let replay_hash = replay_summary.replay_hash();
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::ResolveDispute {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                verdict: metering_chain::tx::DisputeVerdict::Dismissed,
+                replay_hash: replay_hash.clone(),
+                replay_summary: replay_summary.clone(),
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+    let did = metering_chain::state::DisputeId::new(&sid);
+    let d = state.get_dispute(&did).unwrap();
+    assert!(d.resolution_audit.is_some(), "G4: resolution_audit must be set");
+    let audit = d.resolution_audit.as_ref().unwrap();
+    assert_eq!(audit.replay_hash, replay_hash);
+    assert_eq!(audit.replay_summary.gross_spent, 50);
+    let bundle = state.get_evidence_bundle(&sid).unwrap();
+    assert_eq!(bundle.replay_hash, replay_hash);
+    assert_eq!(bundle.settlement_key, sid.key());
 }

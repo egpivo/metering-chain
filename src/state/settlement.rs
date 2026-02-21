@@ -1,7 +1,8 @@
 //! Phase 4A: Settlement aggregate and status.
 //!
-//! See .local/phase4_spec.md for the full domain model.
+//! See .local/phase4_spec.md for the full domain model. G4: ResolutionAudit on Dispute.
 
+use crate::evidence::ReplaySummary;
 use serde::{Deserialize, Serialize};
 
 /// Settlement status lifecycle (Phase 4A: Dispute is stub).
@@ -252,7 +253,14 @@ impl DisputeId {
     }
 }
 
-/// Dispute aggregate (Phase 4B).
+/// Resolution audit for a dispute (G4): replay proof persisted when dispute is resolved.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ResolutionAudit {
+    pub replay_hash: String,
+    pub replay_summary: ReplaySummary,
+}
+
+/// Dispute aggregate (Phase 4B). G4: optional resolution_audit when resolved.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Dispute {
     pub id: DisputeId,
@@ -262,6 +270,9 @@ pub struct Dispute {
     /// Epoch secs when dispute was opened (0 if not used).
     pub opened_at: u64,
     pub status: DisputeStatus,
+    /// G4: set when dispute is resolved (replay-justified).
+    #[serde(default)]
+    pub resolution_audit: Option<ResolutionAudit>,
 }
 
 impl Dispute {
@@ -279,7 +290,13 @@ impl Dispute {
             evidence_hash,
             opened_at,
             status: DisputeStatus::Open,
+            resolution_audit: None,
         }
+    }
+
+    /// G4: set resolution audit when resolving with replay-justified evidence.
+    pub fn set_resolution_audit(&mut self, audit: ResolutionAudit) {
+        self.resolution_audit = Some(audit);
     }
 
     pub fn is_open(&self) -> bool {

@@ -927,6 +927,8 @@ fn validate_resolve_dispute(
         owner,
         service_id,
         window_id,
+        replay_hash,
+        replay_summary,
         ..
     } = &tx.kind
     else {
@@ -950,7 +952,21 @@ fn validate_resolve_dispute(
             tx.signer, expected_nonce, tx.nonce
         )));
     }
+    if replay_hash.is_empty() {
+        return Err(Error::InvalidEvidenceBundle);
+    }
+    if replay_summary.replay_hash() != *replay_hash {
+        return Err(Error::ReplayMismatch);
+    }
     let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
+    let s = state.get_settlement(&sid).ok_or(Error::SettlementNotFound)?;
+    if s.gross_spent != replay_summary.gross_spent
+        || s.operator_share != replay_summary.operator_share
+        || s.protocol_fee != replay_summary.protocol_fee
+        || s.reserve_locked != replay_summary.reserve_locked
+    {
+        return Err(Error::ReplayMismatch);
+    }
     let did = DisputeId::new(&sid);
     let d = state.get_dispute(&did).ok_or(Error::DisputeNotFound)?;
     if !d.is_open() {

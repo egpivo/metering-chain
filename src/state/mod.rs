@@ -14,8 +14,8 @@ pub use policy::{
     PolicyVersionStatus, ReservePolicy,
 };
 pub use settlement::{
-    Claim, ClaimId, ClaimStatus, Dispute, DisputeId, DisputeStatus, Settlement, SettlementId,
-    SettlementStatus,
+    Claim, ClaimId, ClaimStatus, Dispute, DisputeId, DisputeStatus, ResolutionAudit, Settlement,
+    SettlementId, SettlementStatus,
 };
 
 use serde::{Deserialize, Serialize};
@@ -279,6 +279,32 @@ impl State {
             .filter(|pv| pv.id.scope_key == scope_key)
             .map(|pv| pv.id.version)
             .max()
+    }
+
+    /// G4: resolution audit for a dispute (if resolved with evidence).
+    pub fn get_dispute_resolution_audit(
+        &self,
+        settlement_id: &SettlementId,
+    ) -> Option<&ResolutionAudit> {
+        let did = DisputeId::new(settlement_id);
+        self.get_dispute(&did)?.resolution_audit.as_ref()
+    }
+
+    /// G4: build evidence bundle for a settlement from settlement + resolution audit (if resolved).
+    pub fn get_evidence_bundle(
+        &self,
+        settlement_id: &SettlementId,
+    ) -> Option<crate::evidence::EvidenceBundle> {
+        let s = self.get_settlement(settlement_id)?;
+        let audit = self.get_dispute_resolution_audit(settlement_id)?;
+        Some(crate::evidence::EvidenceBundle {
+            settlement_key: settlement_id.key(),
+            from_tx_id: s.from_tx_id,
+            to_tx_id: s.to_tx_id,
+            evidence_hash: s.evidence_hash.clone(),
+            replay_hash: audit.replay_hash.clone(),
+            replay_summary: audit.replay_summary.clone(),
+        })
     }
 }
 

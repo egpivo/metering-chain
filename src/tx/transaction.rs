@@ -82,12 +82,16 @@ pub enum Transaction {
         reason_code: String,
         evidence_hash: String,
     },
-    /// Resolve an open dispute (verdict: Upheld or Dismissed).
+    /// Resolve an open dispute (verdict: Upheld or Dismissed). G4: replay_hash + replay_summary required.
     ResolveDispute {
         owner: String,
         service_id: String,
         window_id: String,
         verdict: DisputeVerdict,
+        /// G4: deterministic hash of replay summary (must match computed from replay_summary).
+        replay_hash: String,
+        /// G4: replay result for the settlement window (must match settlement totals).
+        replay_summary: crate::evidence::ReplaySummary,
     },
     // --- Phase 4C (G3): Policy ---
     /// Publish a policy version (authority/minter-signed).

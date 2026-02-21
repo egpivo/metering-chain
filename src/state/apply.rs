@@ -205,6 +205,8 @@ impl<M: Hook> StateMachine<M> {
                 service_id,
                 window_id,
                 verdict,
+                replay_hash,
+                replay_summary,
             } => {
                 apply_resolve_dispute(
                     &mut new_state,
@@ -212,6 +214,8 @@ impl<M: Hook> StateMachine<M> {
                     service_id,
                     window_id,
                     *verdict,
+                    replay_hash,
+                    replay_summary,
                     &tx.signer,
                 )?;
             }
@@ -527,6 +531,8 @@ fn apply_resolve_dispute(
     service_id: &str,
     window_id: &str,
     verdict: DisputeVerdict,
+    replay_hash: &str,
+    replay_summary: &crate::evidence::ReplaySummary,
     signer: &str,
 ) -> Result<()> {
     let sid = SettlementId::new(
@@ -534,6 +540,17 @@ fn apply_resolve_dispute(
         service_id.to_string(),
         window_id.to_string(),
     );
+    if replay_summary.replay_hash() != replay_hash {
+        return Err(Error::ReplayMismatch);
+    }
+    let s = state.get_settlement(&sid).ok_or(Error::SettlementNotFound)?;
+    if s.gross_spent != replay_summary.gross_spent
+        || s.operator_share != replay_summary.operator_share
+        || s.protocol_fee != replay_summary.protocol_fee
+        || s.reserve_locked != replay_summary.reserve_locked
+    {
+        return Err(Error::ReplayMismatch);
+    }
     let did = DisputeId::new(&sid);
     let dispute = state.get_dispute_mut(&did).ok_or(Error::DisputeNotFound)?;
     let status = match verdict {
@@ -541,6 +558,10 @@ fn apply_resolve_dispute(
         DisputeVerdict::Dismissed => DisputeStatus::Dismissed,
     };
     dispute.resolve(status);
+    dispute.set_resolution_audit(crate::state::ResolutionAudit {
+        replay_hash: replay_hash.to_string(),
+        replay_summary: replay_summary.clone(),
+    });
     if verdict == DisputeVerdict::Dismissed {
         let s = state
             .get_settlement_mut(&sid)

@@ -58,6 +58,9 @@ Use `Error::error_code()` for deterministic UI mapping.
 | `POLICY_NOT_FOUND` | PolicyNotFound | No policy for scope (e.g. Supersede target) |
 | `POLICY_NOT_EFFECTIVE` | PolicyNotEffective | effective_from_tx_id > current_tx_id |
 | `RETROACTIVE_POLICY_FORBIDDEN` | RetroactivePolicyForbidden | effective_from_tx_id must be >= next_tx_id |
+| `INVALID_EVIDENCE_BUNDLE` | InvalidEvidenceBundle | Evidence bundle shape invalid or replay_hash empty |
+| `REPLAY_MISMATCH` | ReplayMismatch | Replay result does not match settlement totals or replay_hash |
+| `EVIDENCE_NOT_FOUND` | EvidenceNotFound | Evidence or bundle not found (optional storage) |
 
 ### Phase 4 Validation Error Matrix (by Tx Type)
 
@@ -68,7 +71,7 @@ Use `Error::error_code()` for deterministic UI mapping.
 | SubmitClaim | `INVALID_TRANSACTION`, `SETTLEMENT_NOT_FOUND`, `SETTLEMENT_NOT_FINALIZED`, `CLAIM_AMOUNT_EXCEEDS_PAYABLE` |
 | PayClaim | `INVALID_TRANSACTION`, `CLAIM_NOT_PENDING`, `CLAIM_AMOUNT_EXCEEDS_PAYABLE` |
 | OpenDispute | `INVALID_TRANSACTION`, `SETTLEMENT_NOT_FOUND`, `SETTLEMENT_NOT_FINALIZED`, `DISPUTE_ALREADY_OPEN` (and window check from bound policy) |
-| ResolveDispute | `INVALID_TRANSACTION`, `DISPUTE_NOT_FOUND`, `DISPUTE_NOT_OPEN` |
+| ResolveDispute | `INVALID_TRANSACTION`, `DISPUTE_NOT_FOUND`, `DISPUTE_NOT_OPEN`, `INVALID_EVIDENCE_BUNDLE`, `REPLAY_MISMATCH`, `SETTLEMENT_NOT_FOUND` |
 | PublishPolicyVersion | `INVALID_TRANSACTION`, `INVALID_POLICY_PARAMETERS`, `POLICY_VERSION_CONFLICT`, `RETROACTIVE_POLICY_FORBIDDEN` |
 | SupersedePolicyVersion | `INVALID_TRANSACTION`, `POLICY_NOT_FOUND` (target not Published) |
 

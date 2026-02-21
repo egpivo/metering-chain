@@ -1048,6 +1048,19 @@ pub fn run(cli: Cli) -> Result<()> {
                 allow_unsigned,
             } => {
                 let (mut state, mut next_tx_id) = load_or_create_state(&storage, &config)?;
+                let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
+                let settlement = state.get_settlement(&sid).ok_or(Error::SettlementNotFound)?;
+                let (replay_summary, _evidence_hash) = metering_chain::replay::replay_slice_to_summary(
+                    &storage,
+                    settlement.from_tx_id,
+                    settlement.to_tx_id,
+                    &owner,
+                    &service_id,
+                    settlement.operator_share,
+                    settlement.protocol_fee,
+                    settlement.reserve_locked,
+                )?;
+                let replay_hash = replay_summary.replay_hash();
                 let verdict_enum = match verdict.to_lowercase().as_str() {
                     "upheld" => DisputeVerdict::Upheld,
                     "dismissed" => DisputeVerdict::Dismissed,
@@ -1067,6 +1080,8 @@ pub fn run(cli: Cli) -> Result<()> {
                         service_id: service_id.clone(),
                         window_id: window_id.clone(),
                         verdict: verdict_enum,
+                        replay_hash: replay_hash.clone(),
+                        replay_summary: replay_summary.clone(),
                     },
                 );
                 let signed_tx = if allow_unsigned {
@@ -1085,12 +1100,12 @@ pub fn run(cli: Cli) -> Result<()> {
                 }
                 let now = metering_chain::current_timestamp().max(0) as u64;
                 const DEFAULT_MAX_AGE: u64 = 300;
-                let live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                live_ctx.next_tx_id = Some(next_tx_id);
                 state = apply(&state, &signed_tx, &live_ctx, Some(&minters))?;
                 next_tx_id += 1;
                 storage.append_tx(&signed_tx)?;
                 storage.persist_state(&state, next_tx_id)?;
-                let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
                 let s = state.get_settlement(&sid).unwrap();
                 let d = state
                     .get_dispute(&metering_chain::state::DisputeId::new(&sid))
