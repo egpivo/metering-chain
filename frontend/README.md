@@ -8,7 +8,7 @@ Deterministic operations UI for settlement lifecycle, claims, payouts, disputes,
 cd frontend && npm install && npm run dev
 ```
 
-Open http://localhost:5173. The app uses **mock data** by default (`MockAdapter`). To use the real CLI backend, run in an environment where the `metering-chain` binary and Node are available and swap the adapter (e.g. `createCliAdapter({ dataDir: '...' })` in `AdapterProvider`).
+Open http://localhost:5173. The app uses **snapshot-backed data** by default (`SnapshotFrontendAdapter`, source: `public/demo_data/phase4_snapshot.json`). Set `VITE_USE_MOCK_ADAPTER=true` to force the old mock adapter.
 
 ## Build
 
@@ -47,6 +47,26 @@ Server that serves the same demo windows shape over HTTP (for BYOK and future Du
 - **CORS:** If you set `VITE_DEMO_PROXY_URL=http://localhost:3001` (cross-origin), the proxy sends `Access-Control-Allow-Origin` for allowed dev origins (e.g. http://localhost:5173) and allows the `X-Dune-Api-Key` header.
 
 **BYOK (Day 8, feature-flag):** Set `VITE_DEMO_BYOK_ENABLED=true`. The demo page shows "Dataset mode: Snapshot | Use my Dune key". In BYOK mode the key is session-only (masked input), sent to the proxy in `X-Dune-Api-Key` only; never stored. Leave `VITE_DEMO_PROXY_URL` unset when using the Vite proxy above.
+
+### Real data as default snapshot (recommended)
+
+If you want the demo to use fresh real data by default (without requiring users to paste keys), refresh the snapshot before running the app:
+
+```bash
+# Uses DUNE_API_KEY from .env, fetches CSV, then writes frontend/public/demo_data/phase4_snapshot.json
+frontend/server/refresh_demo_snapshot.sh
+```
+
+Optional args:
+
+```bash
+frontend/server/refresh_demo_snapshot.sh /tmp/helium_rewards.csv frontend/public/demo_data/phase4_snapshot.json
+```
+
+Environment knobs:
+- `DUNE_DAYS` (default `14`)
+- `DUNE_LIMIT` (default `20000`)
+- `DEMO_SERVICE_ID` (default `helium-iot`)
 
 ## Structure
 

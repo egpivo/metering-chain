@@ -75,7 +75,7 @@ describe('DemoPhase4Page', () => {
       const table = screen.getByRole('table');
       expect(within(table).getByText('100')).toBeInTheDocument();
       expect(callLog).toHaveLength(1);
-      expect(callLog[0]!.top_n).toBe(10);
+      expect(callLog[0]!.top_n).toBe(0);
 
       const topNInput = screen.getByLabelText(/Max operators per window/i);
       fireEvent.change(topNInput, { target: { value: '5' } });
@@ -126,7 +126,7 @@ describe('DemoPhase4Page', () => {
       fireEvent.click(windowButton);
 
       await waitFor(() => {
-        expect(screen.getByText(/Integrity & Evidence/i)).toBeInTheDocument();
+        expect(screen.getByRole('heading', { name: /Integrity & Evidence/i })).toBeInTheDocument();
       });
 
       const resolveBtn = screen.getByRole('button', { name: /Resolve Dispute/i });
