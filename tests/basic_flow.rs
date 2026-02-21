@@ -2669,6 +2669,7 @@ fn test_g2_dispute_freezes_payout_then_resolve_dismissed_allows_pay() {
                 service_id: "storage".to_string(),
                 window_id: "w1".to_string(),
                 verdict: DisputeVerdict::Dismissed,
+                evidence_hash: s.evidence_hash.clone(),
                 replay_hash: replay_hash.clone(),
                 replay_summary: replay_summary.clone(),
             },
@@ -2872,6 +2873,7 @@ fn test_g2_resolve_dispute_upheld_keeps_payout_frozen() {
                 service_id: "storage".to_string(),
                 window_id: "w1".to_string(),
                 verdict: DisputeVerdict::Upheld,
+                evidence_hash: s.evidence_hash.clone(),
                 replay_hash: replay_hash.clone(),
                 replay_summary: replay_summary.clone(),
             },
@@ -3898,6 +3900,7 @@ fn test_g4_resolve_dispute_requires_valid_evidence_bundle() {
                 service_id: "storage".to_string(),
                 window_id: "w1".to_string(),
                 verdict: metering_chain::tx::DisputeVerdict::Dismissed,
+                evidence_hash: String::new(),
                 replay_hash: String::new(),
                 replay_summary: summary,
             },
@@ -4028,6 +4031,8 @@ fn test_g4_resolve_dispute_rejects_replay_mismatch() {
         Some(&minters),
     )
     .unwrap();
+    let sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w1".to_string());
+    let s = state.get_settlement(&sid).unwrap();
     let wrong_summary = ReplaySummary::new(0, 3, 3, 99, 45, 5, 0);
     let replay_hash = wrong_summary.replay_hash();
     let res = apply(
@@ -4040,6 +4045,7 @@ fn test_g4_resolve_dispute_rejects_replay_mismatch() {
                 service_id: "storage".to_string(),
                 window_id: "w1".to_string(),
                 verdict: metering_chain::tx::DisputeVerdict::Dismissed,
+                evidence_hash: s.evidence_hash.clone(),
                 replay_hash: replay_hash.clone(),
                 replay_summary: wrong_summary,
             },
@@ -4050,6 +4056,151 @@ fn test_g4_resolve_dispute_rejects_replay_mismatch() {
     assert!(
         matches!(res, Err(Error::ReplayMismatch)),
         "expected ReplayMismatch, got {:?}",
+        res
+    );
+}
+
+/// G4: ResolveDispute with replay_summary window not matching settlement → ReplayMismatch (no self-filled summary bypass).
+#[test]
+fn test_g4_resolve_dispute_rejects_wrong_window() {
+    use metering_chain::evidence::ReplaySummary;
+    use metering_chain::state::SettlementId;
+
+    let minters = get_authorized_minters();
+    let mut state = State::new();
+    let rctx = replay_ctx();
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            0,
+            Transaction::Mint {
+                to: "alice".to_string(),
+                amount: 1000,
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "alice".to_string(),
+            0,
+            Transaction::OpenMeter {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                deposit: 100,
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "alice".to_string(),
+            1,
+            Transaction::Consume {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                units: 10,
+                pricing: Pricing::UnitPrice(5),
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    let sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w1".to_string());
+    let ev_hash = metering_chain::evidence::evidence_hash(b"alice:storage:w1:0:3");
+    let mut ctx = metering_chain::tx::validation::ValidationContext::replay();
+    ctx.next_tx_id = Some(4);
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::ProposeSettlement {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                from_tx_id: 0,
+                to_tx_id: 3,
+                gross_spent: 50,
+                operator_share: 45,
+                protocol_fee: 5,
+                reserve_locked: 0,
+                evidence_hash: ev_hash,
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+    ctx.next_tx_id = Some(5);
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::FinalizeSettlement {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::OpenDispute {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                reason_code: "test".to_string(),
+                evidence_hash: String::new(),
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+    let s = state.get_settlement(&sid).unwrap();
+    // Correct totals but wrong window (1..4 instead of 0..3) → must be rejected
+    let wrong_window_summary = ReplaySummary::new(1, 4, 3, 50, 45, 5, 0);
+    let replay_hash = wrong_window_summary.replay_hash();
+    let res = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            state.get_account("authority").map(|a| a.nonce()).unwrap_or(0),
+            Transaction::ResolveDispute {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                verdict: metering_chain::tx::DisputeVerdict::Dismissed,
+                evidence_hash: s.evidence_hash.clone(),
+                replay_hash,
+                replay_summary: wrong_window_summary,
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    );
+    assert!(
+        matches!(res, Err(Error::ReplayMismatch)),
+        "expected ReplayMismatch (wrong window), got {:?}",
         res
     );
 }
@@ -4192,6 +4343,7 @@ fn test_g4_resolve_dispute_accepts_matching_replay() {
                 service_id: "storage".to_string(),
                 window_id: "w1".to_string(),
                 verdict: metering_chain::tx::DisputeVerdict::Dismissed,
+                evidence_hash: s.evidence_hash.clone(),
                 replay_hash: replay_hash.clone(),
                 replay_summary: replay_summary.clone(),
             },
@@ -4209,4 +4361,255 @@ fn test_g4_resolve_dispute_accepts_matching_replay() {
     let bundle = state.get_evidence_bundle(&sid).unwrap();
     assert_eq!(bundle.replay_hash, replay_hash);
     assert_eq!(bundle.settlement_key, sid.key());
+}
+
+/// G4: EvidenceBundle canonical serialization yields deterministic bundle_hash; roundtrip preserves hash.
+#[test]
+fn test_g4_evidence_bundle_roundtrip_deterministic_hash() {
+    use metering_chain::evidence::{EvidenceBundle, ReplaySummary};
+
+    let summary = ReplaySummary::new(0, 3, 3, 50, 45, 5, 0);
+    let replay_hash = summary.replay_hash();
+    let bundle = EvidenceBundle {
+        settlement_key: "alice:storage:w1".to_string(),
+        from_tx_id: 0,
+        to_tx_id: 3,
+        evidence_hash: "abc123".to_string(),
+        replay_hash: replay_hash.clone(),
+        replay_summary: summary.clone(),
+    };
+    let h1 = bundle.bundle_hash();
+    let h2 = bundle.bundle_hash();
+    assert_eq!(h1, h2, "bundle_hash must be deterministic");
+
+    let bytes = bundle.canonical_bytes();
+    let restored: EvidenceBundle = bincode::deserialize(&bytes).unwrap();
+    assert_eq!(restored.bundle_hash(), h1, "roundtrip must preserve bundle_hash");
+    assert!(restored.validate_shape().is_ok());
+}
+
+/// G4: replay_slice_to_summary yields same replay_hash when called twice for same window (determinism).
+#[test]
+fn test_g4_replay_hash_determinism_across_replay_to_tip() {
+    use metering_chain::tx::Pricing;
+
+    let (mut storage, _temp_dir) = create_test_storage();
+    let minters = get_authorized_minters();
+    let mut state = State::new();
+    let mut next_tx_id = 0u64;
+    let rctx = replay_ctx();
+
+    let tx1 = SignedTx::new(
+        "authority".to_string(),
+        0,
+        Transaction::Mint {
+            to: "alice".to_string(),
+            amount: 1000,
+        },
+    );
+    state = apply(&state, &tx1, &rctx, Some(&minters)).unwrap();
+    storage.append_tx(&tx1).unwrap();
+    next_tx_id += 1;
+    storage.persist_state(&state, next_tx_id).unwrap();
+
+    let tx2 = SignedTx::new(
+        "alice".to_string(),
+        0,
+        Transaction::OpenMeter {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            deposit: 100,
+        },
+    );
+    state = apply(&state, &tx2, &rctx, Some(&minters)).unwrap();
+    storage.append_tx(&tx2).unwrap();
+    next_tx_id += 1;
+    storage.persist_state(&state, next_tx_id).unwrap();
+
+    let tx3 = SignedTx::new(
+        "alice".to_string(),
+        1,
+        Transaction::Consume {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            units: 10,
+            pricing: Pricing::UnitPrice(5),
+        },
+    );
+    state = apply(&state, &tx3, &rctx, Some(&minters)).unwrap();
+    storage.append_tx(&tx3).unwrap();
+    next_tx_id += 1;
+    storage.persist_state(&state, next_tx_id).unwrap();
+
+    let (summary1, ev1) = replay::replay_slice_to_summary(
+        &storage,
+        0,
+        3,
+        "alice",
+        "storage",
+        45,
+        5,
+        0,
+    )
+    .unwrap();
+    let (summary2, ev2) = replay::replay_slice_to_summary(
+        &storage,
+        0,
+        3,
+        "alice",
+        "storage",
+        45,
+        5,
+        0,
+    )
+    .unwrap();
+    assert_eq!(summary1.replay_hash(), summary2.replay_hash(), "replay_hash determinism");
+    assert_eq!(ev1, ev2);
+    assert_eq!(summary1.gross_spent, 50);
+}
+
+/// G4: After ResolveDispute, persisted state replayed via replay_to_tip has same resolution_audit.
+#[test]
+fn test_g4_audit_fields_persist_and_replay_consistent() {
+    use metering_chain::evidence::ReplaySummary;
+    use metering_chain::state::SettlementId;
+    use metering_chain::tx::Pricing;
+
+    let (mut storage, _temp_dir) = create_test_storage();
+    let minters = get_authorized_minters();
+    let mut state = State::new();
+    let mut next_tx_id = 0u64;
+    let mut ctx = metering_chain::tx::validation::ValidationContext::replay();
+
+    let txs = [
+        SignedTx::new(
+            "authority".to_string(),
+            0,
+            Transaction::Mint {
+                to: "alice".to_string(),
+                amount: 1000,
+            },
+        ),
+        SignedTx::new(
+            "alice".to_string(),
+            0,
+            Transaction::OpenMeter {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                deposit: 100,
+            },
+        ),
+        SignedTx::new(
+            "alice".to_string(),
+            1,
+            Transaction::Consume {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                units: 10,
+                pricing: Pricing::UnitPrice(5),
+            },
+        ),
+    ];
+    for tx in &txs {
+        ctx.next_tx_id = Some(next_tx_id);
+        state = apply(&state, tx, &ctx, Some(&minters)).unwrap();
+        storage.append_tx(tx).unwrap();
+        next_tx_id += 1;
+        storage.persist_state(&state, next_tx_id).unwrap();
+    }
+    let ev_hash = metering_chain::evidence::evidence_hash(b"alice:storage:w1:0:3");
+    ctx.next_tx_id = Some(next_tx_id);
+    let tx_propose = SignedTx::new(
+        "authority".to_string(),
+        state.get_account("authority").map(|a| a.nonce()).unwrap_or(0),
+        Transaction::ProposeSettlement {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            window_id: "w1".to_string(),
+            from_tx_id: 0,
+            to_tx_id: 3,
+            gross_spent: 50,
+            operator_share: 45,
+            protocol_fee: 5,
+            reserve_locked: 0,
+            evidence_hash: ev_hash,
+        },
+    );
+    state = apply(&state, &tx_propose, &ctx, Some(&minters)).unwrap();
+    storage.append_tx(&tx_propose).unwrap();
+    next_tx_id += 1;
+    storage.persist_state(&state, next_tx_id).unwrap();
+
+    ctx.next_tx_id = Some(next_tx_id);
+    let tx_finalize = SignedTx::new(
+        "authority".to_string(),
+        state.get_account("authority").map(|a| a.nonce()).unwrap_or(0),
+        Transaction::FinalizeSettlement {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            window_id: "w1".to_string(),
+        },
+    );
+    state = apply(&state, &tx_finalize, &ctx, Some(&minters)).unwrap();
+    storage.append_tx(&tx_finalize).unwrap();
+    next_tx_id += 1;
+    storage.persist_state(&state, next_tx_id).unwrap();
+
+    ctx.next_tx_id = Some(next_tx_id);
+    let tx_open = SignedTx::new(
+        "authority".to_string(),
+        state.get_account("authority").map(|a| a.nonce()).unwrap_or(0),
+        Transaction::OpenDispute {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            window_id: "w1".to_string(),
+            reason_code: "test".to_string(),
+            evidence_hash: String::new(),
+        },
+    );
+    state = apply(&state, &tx_open, &ctx, Some(&minters)).unwrap();
+    storage.append_tx(&tx_open).unwrap();
+    next_tx_id += 1;
+    storage.persist_state(&state, next_tx_id).unwrap();
+
+    let sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w1".to_string());
+    let s = state.get_settlement(&sid).unwrap();
+    let replay_summary = ReplaySummary::new(
+        s.from_tx_id,
+        s.to_tx_id,
+        s.to_tx_id.saturating_sub(s.from_tx_id),
+        s.gross_spent,
+        s.operator_share,
+        s.protocol_fee,
+        s.reserve_locked,
+    );
+    let replay_hash = replay_summary.replay_hash();
+    ctx.next_tx_id = Some(next_tx_id);
+    let tx_resolve = SignedTx::new(
+        "authority".to_string(),
+        state.get_account("authority").map(|a| a.nonce()).unwrap_or(0),
+        Transaction::ResolveDispute {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            window_id: "w1".to_string(),
+            verdict: metering_chain::tx::DisputeVerdict::Dismissed,
+            evidence_hash: s.evidence_hash.clone(),
+            replay_hash: replay_hash.clone(),
+            replay_summary: replay_summary.clone(),
+        },
+    );
+    state = apply(&state, &tx_resolve, &ctx, Some(&minters)).unwrap();
+    storage.append_tx(&tx_resolve).unwrap();
+    next_tx_id += 1;
+    storage.persist_state(&state, next_tx_id).unwrap();
+
+    let (replayed_state, replayed_next) = replay::replay_to_tip(&storage).unwrap();
+    assert_eq!(replayed_next, next_tx_id);
+    let audit = replayed_state
+        .get_dispute_resolution_audit(&sid)
+        .expect("resolution_audit must exist after replay");
+    assert_eq!(audit.replay_hash, replay_hash);
+    assert_eq!(audit.replay_summary.gross_spent, replay_summary.gross_spent);
+    assert_eq!(audit.replay_summary.from_tx_id, replay_summary.from_tx_id);
+    assert_eq!(audit.replay_summary.to_tx_id, replay_summary.to_tx_id);
 }

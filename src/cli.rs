@@ -294,8 +294,26 @@ pub enum SettlementSub {
         #[arg(long)]
         status: Option<String>,
     },
-    /// Show settlement detail
+    /// Show settlement detail (includes G4 evidence/replay when dispute was resolved)
     Show {
+        #[arg(long)]
+        owner: String,
+        #[arg(long)]
+        service_id: String,
+        #[arg(long)]
+        window_id: String,
+    },
+    /// Show dispute for a settlement (G4)
+    DisputeShow {
+        #[arg(long)]
+        owner: String,
+        #[arg(long)]
+        service_id: String,
+        #[arg(long)]
+        window_id: String,
+    },
+    /// Show evidence bundle for a settlement (G4: replay_hash, replay_summary, evidence_hash)
+    EvidenceShow {
         #[arg(long)]
         owner: String,
         #[arg(long)]
@@ -494,6 +512,40 @@ pub fn run(cli: Cli) -> Result<()> {
                 &live_ctx,
                 Some(&minters),
             )?;
+
+            // G4: For ResolveDispute, enforce node-side replay — recompute from storage and require tx payload matches.
+            if let Transaction::ResolveDispute {
+                owner,
+                service_id,
+                window_id,
+                evidence_hash: tx_evidence_hash,
+                replay_hash: tx_replay_hash,
+                replay_summary: tx_replay_summary,
+                ..
+            } = &signed_tx.kind
+            {
+                let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
+                let s = state.get_settlement(&sid).ok_or(Error::SettlementNotFound)?;
+                let (node_summary, node_evidence_hash) = replay::replay_slice_to_summary(
+                    &storage,
+                    s.from_tx_id,
+                    s.to_tx_id,
+                    owner,
+                    service_id,
+                    s.operator_share,
+                    s.protocol_fee,
+                    s.reserve_locked,
+                )?;
+                if node_evidence_hash != s.evidence_hash {
+                    return Err(Error::ReplayMismatch);
+                }
+                if &node_summary != tx_replay_summary || node_summary.replay_hash() != *tx_replay_hash {
+                    return Err(Error::ReplayMismatch);
+                }
+                if *tx_evidence_hash != s.evidence_hash {
+                    return Err(Error::ReplayMismatch);
+                }
+            }
 
             if dry_run {
                 println!("Transaction is valid");
@@ -1080,6 +1132,7 @@ pub fn run(cli: Cli) -> Result<()> {
                         service_id: service_id.clone(),
                         window_id: window_id.clone(),
                         verdict: verdict_enum,
+                        evidence_hash: settlement.evidence_hash.clone(),
                         replay_hash: replay_hash.clone(),
                         replay_summary: replay_summary.clone(),
                     },
@@ -1164,6 +1217,10 @@ pub fn run(cli: Cli) -> Result<()> {
                 let s = state
                     .get_settlement(&sid)
                     .ok_or(Error::SettlementNotFound)?;
+                let (replay_hash, replay_summary) = state
+                    .get_dispute_resolution_audit(&sid)
+                    .map(|a| (Some(a.replay_hash.clone()), Some(a.replay_summary.clone())))
+                    .unwrap_or((None, None));
                 let output = SettlementShowOutput {
                     settlement_id: sid.key(),
                     owner: s.id.owner.clone(),
@@ -1179,6 +1236,8 @@ pub fn run(cli: Cli) -> Result<()> {
                     evidence_hash: s.evidence_hash.clone(),
                     from_tx_id: s.from_tx_id,
                     to_tx_id: s.to_tx_id,
+                    replay_hash,
+                    replay_summary,
                     claims: state
                         .claims
                         .values()
@@ -1189,6 +1248,52 @@ pub fn run(cli: Cli) -> Result<()> {
                             status: format!("{:?}", c.status),
                         })
                         .collect(),
+                };
+                println!("{}", format_output(&output, &cli.format)?);
+                Ok(())
+            }
+            SettlementSub::DisputeShow {
+                owner,
+                service_id,
+                window_id,
+            } => {
+                let (state, _) = load_or_create_state(&storage, &config)?;
+                let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
+                let _ = state
+                    .get_settlement(&sid)
+                    .ok_or(Error::SettlementNotFound)?;
+                let did = metering_chain::state::DisputeId::new(&sid);
+                let d = state
+                    .get_dispute(&did)
+                    .ok_or(Error::DisputeNotFound)?;
+                let output = DisputeShowOutput {
+                    settlement_key: sid.key(),
+                    status: format!("{:?}", d.status),
+                    resolution_audit: d.resolution_audit.as_ref().map(|a| ResolutionAuditOutput {
+                        replay_hash: a.replay_hash.clone(),
+                        replay_summary: a.replay_summary.clone(),
+                    }),
+                };
+                println!("{}", format_output(&output, &cli.format)?);
+                Ok(())
+            }
+            SettlementSub::EvidenceShow {
+                owner,
+                service_id,
+                window_id,
+            } => {
+                let (state, _) = load_or_create_state(&storage, &config)?;
+                let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
+                let bundle = state
+                    .get_evidence_bundle(&sid)
+                    .ok_or(Error::EvidenceNotFound)?;
+                let output = EvidenceShowOutput {
+                    settlement_key: bundle.settlement_key.clone(),
+                    from_tx_id: bundle.from_tx_id,
+                    to_tx_id: bundle.to_tx_id,
+                    evidence_hash: bundle.evidence_hash.clone(),
+                    replay_hash: bundle.replay_hash.clone(),
+                    replay_summary: bundle.replay_summary.clone(),
                 };
                 println!("{}", format_output(&output, &cli.format)?);
                 Ok(())
@@ -1475,5 +1580,32 @@ struct SettlementShowOutput {
     evidence_hash: String,
     from_tx_id: u64,
     to_tx_id: u64,
+    /// G4: set when dispute was resolved (resolution_audit)
+    replay_hash: Option<String>,
+    /// G4: set when dispute was resolved
+    replay_summary: Option<metering_chain::evidence::ReplaySummary>,
     claims: Vec<ClaimSummaryOutput>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ResolutionAuditOutput {
+    replay_hash: String,
+    replay_summary: metering_chain::evidence::ReplaySummary,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct DisputeShowOutput {
+    settlement_key: String,
+    status: String,
+    resolution_audit: Option<ResolutionAuditOutput>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct EvidenceShowOutput {
+    settlement_key: String,
+    from_tx_id: u64,
+    to_tx_id: u64,
+    evidence_hash: String,
+    replay_hash: String,
+    replay_summary: metering_chain::evidence::ReplaySummary,
 }

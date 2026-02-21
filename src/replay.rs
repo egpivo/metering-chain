@@ -87,7 +87,15 @@ pub fn replay_tx_slice(
     Ok(s)
 }
 
-/// Replay the settlement window from storage and build ReplaySummary using settlement's split (G4).
+/// Replay the settlement window from storage and build ReplaySummary (G4).
+///
+/// **Replay-derived**: `gross_spent` (from meter delta), `from_tx_id`, `to_tx_id`, `tx_count`, and
+/// the returned `evidence_hash` (hash of the tx slice). **Taken from settlement for comparison**:
+/// `operator_share`, `protocol_fee`, `reserve_locked` — these are not recomputed from policy here;
+/// the resolver passes the settlement's recorded split so the summary can be compared to the
+/// settlement in ResolveDispute. Validation enforces that the summary's from/to match the
+/// settlement's window and that evidence_hash in the tx matches the settlement.
+///
 /// Returns (ReplaySummary, evidence_hash of the tx slice) for the window [from_tx_id, to_tx_id).
 pub fn replay_slice_to_summary<S: Storage>(
     storage: &S,

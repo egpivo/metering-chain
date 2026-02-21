@@ -205,6 +205,7 @@ impl<M: Hook> StateMachine<M> {
                 service_id,
                 window_id,
                 verdict,
+                evidence_hash: tx_evidence_hash,
                 replay_hash,
                 replay_summary,
             } => {
@@ -214,6 +215,7 @@ impl<M: Hook> StateMachine<M> {
                     service_id,
                     window_id,
                     *verdict,
+                    tx_evidence_hash,
                     replay_hash,
                     replay_summary,
                     &tx.signer,
@@ -531,6 +533,7 @@ fn apply_resolve_dispute(
     service_id: &str,
     window_id: &str,
     verdict: DisputeVerdict,
+    evidence_hash: &str,
     replay_hash: &str,
     replay_summary: &crate::evidence::ReplaySummary,
     signer: &str,
@@ -540,10 +543,26 @@ fn apply_resolve_dispute(
         service_id.to_string(),
         window_id.to_string(),
     );
+    let s = state.get_settlement(&sid).ok_or(Error::SettlementNotFound)?;
+    // G4: bind proof to settlement window (defense in depth).
+    if s.evidence_hash != evidence_hash {
+        return Err(Error::ReplayMismatch);
+    }
+    if replay_summary.from_tx_id != s.from_tx_id || replay_summary.to_tx_id != s.to_tx_id {
+        return Err(Error::ReplayMismatch);
+    }
+    let bundle = crate::evidence::EvidenceBundle {
+        settlement_key: sid.key(),
+        from_tx_id: s.from_tx_id,
+        to_tx_id: s.to_tx_id,
+        evidence_hash: s.evidence_hash.clone(),
+        replay_hash: replay_hash.to_string(),
+        replay_summary: replay_summary.clone(),
+    };
+    bundle.validate_shape()?;
     if replay_summary.replay_hash() != replay_hash {
         return Err(Error::ReplayMismatch);
     }
-    let s = state.get_settlement(&sid).ok_or(Error::SettlementNotFound)?;
     if s.gross_spent != replay_summary.gross_spent
         || s.operator_share != replay_summary.operator_share
         || s.protocol_fee != replay_summary.protocol_fee

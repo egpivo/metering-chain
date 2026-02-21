@@ -82,15 +82,17 @@ pub enum Transaction {
         reason_code: String,
         evidence_hash: String,
     },
-    /// Resolve an open dispute (verdict: Upheld or Dismissed). G4: replay_hash + replay_summary required.
+    /// Resolve an open dispute (verdict: Upheld or Dismissed). G4: replay_hash + replay_summary + evidence_hash required.
     ResolveDispute {
         owner: String,
         service_id: String,
         window_id: String,
         verdict: DisputeVerdict,
+        /// G4: must equal settlement.evidence_hash (binds proof to settlement tx window).
+        evidence_hash: String,
         /// G4: deterministic hash of replay summary (must match computed from replay_summary).
         replay_hash: String,
-        /// G4: replay result for the settlement window (must match settlement totals).
+        /// G4: replay result for the settlement window (from_tx_id/to_tx_id must match settlement; totals must match).
         replay_summary: crate::evidence::ReplaySummary,
     },
     // --- Phase 4C (G3): Policy ---

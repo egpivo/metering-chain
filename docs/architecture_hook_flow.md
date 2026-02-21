@@ -153,10 +153,15 @@ flowchart TB
     POH -.-> Hook
 ```
 
-## Phase 4 (G1/G2) vs spec
+## Phase 4 (G1/G2/G4) vs spec
 
-G1 (Settlement) and G2 (Dispute) core flows are implemented. Versus the full **phase4_spec.md** wording, the following are **deferred** (see `.local/phase4_g2_tasks.md`):
+G1 (Settlement) and G2 (Dispute) core flows are implemented. **G4 (Evidence finality)** is implemented: ResolveDispute is replay-justified; evidence bundle and `validate_shape()` are used in the resolve path; settlement window and `evidence_hash` are bound in the tx and validated.
 
-- **OpenDispute** “must be within dispute window”: no challenge-window check yet (4C).
-- **ResolveDispute** “deterministic replay result must justify verdict”: verdict is accepted and applied; no replay-justification step yet.
-- **Auditability** “evidence bundle + replay hash”: placeholder/deferred; settlement stores `evidence_hash` and tx range only.
+- **ResolveDispute** “deterministic replay result must justify verdict”: implemented — validation and apply require `replay_summary.from_tx_id`/`to_tx_id` equal to settlement window, `evidence_hash` equal to settlement, `EvidenceBundle.validate_shape()`, and settlement totals vs replay summary. **Node-side replay**: when applying a ResolveDispute via the **Apply** command (e.g. submitted tx from file), the CLI recomputes the replay from storage (`replay_slice_to_summary`) and rejects with `ReplayMismatch` unless the tx's replay summary and hash match the node's result; this prevents "submit matching summary" without actual replay.
+- **Auditability** “evidence bundle + replay hash”: implemented — settlement stores `evidence_hash` and tx range; after resolve, dispute stores `resolution_audit` (replay_hash, replay_summary); `get_evidence_bundle(settlement_id)` and CLI `settlement show` / `dispute show` / `evidence show` expose G4 fields.
+
+**Implemented**:
+
+- **OpenDispute** “must be within dispute window”: enforced in validation when settlement has `dispute_window_secs` and `finalized_at` and context provides `now` (live); rejects with “outside dispute window” if `now > finalized_at + dispute_window_secs`.
+
+**Still deferred** (see `.local/phase4_g2_tasks.md`): any remaining 4C policy/UX items.

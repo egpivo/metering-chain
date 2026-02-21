@@ -929,6 +929,7 @@ fn validate_resolve_dispute(
         owner,
         service_id,
         window_id,
+        evidence_hash: tx_evidence_hash,
         replay_hash,
         replay_summary,
         ..
@@ -954,14 +955,32 @@ fn validate_resolve_dispute(
             tx.signer, expected_nonce, tx.nonce
         )));
     }
-    if replay_hash.is_empty() {
+    if replay_hash.is_empty() || tx_evidence_hash.is_empty() {
         return Err(Error::InvalidEvidenceBundle);
-    }
-    if replay_summary.replay_hash() != *replay_hash {
-        return Err(Error::ReplayMismatch);
     }
     let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
     let s = state.get_settlement(&sid).ok_or(Error::SettlementNotFound)?;
+    // G4: bind proof to settlement window — evidence_hash must match settlement (same tx slice).
+    if s.evidence_hash != *tx_evidence_hash {
+        return Err(Error::ReplayMismatch);
+    }
+    // G4: replay_summary must be for this settlement's tx range (not a self-filled summary for another window).
+    if replay_summary.from_tx_id != s.from_tx_id || replay_summary.to_tx_id != s.to_tx_id {
+        return Err(Error::ReplayMismatch);
+    }
+    // G4: validate evidence bundle shape (from/to, tx_count, replay_summary window consistency).
+    let bundle = crate::evidence::EvidenceBundle {
+        settlement_key: sid.key(),
+        from_tx_id: s.from_tx_id,
+        to_tx_id: s.to_tx_id,
+        evidence_hash: s.evidence_hash.clone(),
+        replay_hash: replay_hash.clone(),
+        replay_summary: replay_summary.clone(),
+    };
+    bundle.validate_shape()?;
+    if replay_summary.replay_hash() != *replay_hash {
+        return Err(Error::ReplayMismatch);
+    }
     if s.gross_spent != replay_summary.gross_spent
         || s.operator_share != replay_summary.operator_share
         || s.protocol_fee != replay_summary.protocol_fee
