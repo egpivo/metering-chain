@@ -35,7 +35,7 @@ cargo build --release
 ```bash
 cargo run --bin metering-chain -- init
 
-# Phase 2 default: signed tx required. For legacy unsigned examples, pass --allow-unsigned.
+# Basic usage flow (unsigned examples; for production use signed tx)
 cat examples/tx/01_mint_alice.json | cargo run --bin metering-chain -- apply --allow-unsigned
 cat examples/tx/02_open_storage.json | cargo run --bin metering-chain -- apply --allow-unsigned
 cat examples/tx/03_consume_storage_unit_price.json | cargo run --bin metering-chain -- apply --allow-unsigned
@@ -45,25 +45,35 @@ cargo run --bin metering-chain -- account 0x...A11
 cargo run --bin metering-chain -- meters 0x...A11
 ```
 
-### Phase 2 signed demo (default: signed tx required)
+### Signed transactions (Mint → Open → Consume → Close)
 
-Strict flow with real signatures (no `--allow-unsigned`):
+End-to-end flow with real signatures (no `--allow-unsigned`):
 
 ```bash
 ./examples/signed/run_signed_demo.sh
 ```
 
-The script runs `init`, creates two wallets (authority + user), sets `METERING_CHAIN_MINTERS`, then Mint, OpenMeter, Consume, CloseMeter with signed tx. See `docs/phase2_signed_demo.md` and `examples/signed/README.md` for manual steps and kind templates.
+Creates authority + user wallets, sets `METERING_CHAIN_MINTERS`, then runs Mint, OpenMeter, Consume, CloseMeter with signed tx. See `docs/phase2_signed_demo.md` and `examples/signed/README.md` for manual steps and JSON templates.
 
-### Phase 3 delegation demo
+### Delegation (signer ≠ owner)
 
-Delegation flow with `signer != owner`: no-proof reject, with-proof accept, revoke then reject.
+Prove-and-consume flow: reject without proof, accept with capability proof, revoke then reject.
 
 ```bash
 ./examples/phase3_demo/run_phase3_demo.sh
 ```
 
 See `examples/phase3_demo/README.md` for expected scenes and manual steps.
+
+### Settlement & payouts (propose → finalize → claim → pay)
+
+Propose a settlement window, finalize it, submit operator claims, then pay out. Single binary, in-memory state.
+
+```bash
+cargo run --example settlement_demo
+```
+
+For disputes, policy, and evidence-backed resolve use the CLI (`settlement`, `dispute`, `policy` subcommands) or the frontend; see `docs/architecture_hook_flow.md` and `frontend/README.md`.
 
 ---
 
@@ -123,7 +133,17 @@ cargo run --bin metering-chain -- --format json account <address>
 
 ## Architecture
 
-![Metering Chain architecture](docs/arch.gif)
+### Core Engine (Deterministic State Machine)
+
+Shows the base transaction engine: deterministic validation, state transitions, and auditable outputs.
+
+![Metering Chain core architecture](docs/arch.gif)
+
+### Settlement & Finality Flow (Hook-Based)
+
+Shows how usage becomes settlement decisions with policy snapshots, replay/evidence verification, dispute freeze rules, and payout gating.
+
+![Metering Chain phase 4 hook architecture](docs/hook.png)
 
 ---
 
