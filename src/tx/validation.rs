@@ -42,12 +42,14 @@ impl ValidationContext {
         }
     }
 
-    /// Replay context for applying the tx at index `tx_index`, so G3 policy binding and finalized_at are reconstructed.
-    /// Sets next_tx_id = tx_index and now = 0 (deterministic replay time for FinalizeSettlement/OpenDispute).
+    /// Replay context for applying the tx at index `tx_index`, so G3 policy binding is reconstructed.
+    /// Sets next_tx_id = tx_index. Leaves now = None so FinalizeSettlement does not set finalized_at
+    /// during replay; otherwise replayed settlements would have finalized_at=0 and live OpenDispute
+    /// would reject (deadline = 0 + window would be in the past).
     pub fn replay_for_tx(tx_index: u64) -> Self {
         ValidationContext {
             mode: ValidationMode::Replay,
-            now: Some(0),
+            now: None,
             max_age: None,
             next_tx_id: Some(tx_index),
         }
