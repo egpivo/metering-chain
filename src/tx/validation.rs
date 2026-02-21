@@ -895,9 +895,7 @@ fn validate_open_dispute(
         .get_settlement(&sid)
         .ok_or(Error::SettlementNotFound)?;
     if !s.is_finalized() {
-        return Err(Error::InvalidTransaction(
-            "OpenDispute: settlement must be finalized".to_string(),
-        ));
+        return Err(Error::SettlementNotFinalized);
     }
     if let (Some(window_secs), Some(finalized_at)) =
         (s.dispute_window_secs, s.finalized_at)
