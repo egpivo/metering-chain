@@ -1,5 +1,6 @@
 use crate::error::{Error, Result};
 use crate::state::hook::Hook;
+use crate::state::policy::{PolicyVersion, PolicyVersionId, PolicyVersionStatus};
 use crate::state::settlement::{
     Claim, ClaimId, Dispute, DisputeId, DisputeStatus, Settlement, SettlementId,
 };
@@ -133,6 +134,7 @@ impl<M: Hook> StateMachine<M> {
                     *reserve_locked,
                     evidence_hash,
                     &tx.signer,
+                    ctx.next_tx_id,
                 )?;
             }
             Transaction::FinalizeSettlement {
@@ -146,6 +148,7 @@ impl<M: Hook> StateMachine<M> {
                     service_id,
                     window_id,
                     &tx.signer,
+                    ctx.now,
                 )?;
             }
             Transaction::SubmitClaim {
@@ -211,6 +214,25 @@ impl<M: Hook> StateMachine<M> {
                     *verdict,
                     &tx.signer,
                 )?;
+            }
+            Transaction::PublishPolicyVersion {
+                scope,
+                version,
+                effective_from_tx_id,
+                config,
+            } => {
+                apply_publish_policy_version(
+                    &mut new_state,
+                    scope.clone(),
+                    *version,
+                    *effective_from_tx_id,
+                    config.clone(),
+                    &tx.signer,
+                    ctx.now.unwrap_or(0),
+                )?;
+            }
+            Transaction::SupersedePolicyVersion { scope_key, version } => {
+                apply_supersede_policy_version(&mut new_state, scope_key, *version, &tx.signer)?;
             }
         }
 
@@ -340,22 +362,46 @@ fn apply_propose_settlement(
     reserve_locked: u64,
     evidence_hash: &str,
     signer: &str,
+    next_tx_id: Option<u64>,
 ) -> Result<()> {
     let id = SettlementId::new(
         owner.to_string(),
         service_id.to_string(),
         window_id.to_string(),
     );
-    let settlement = Settlement::proposed(
-        id,
+    let (op_share, proto_fee, res_locked) = if let Some(current_tx_id) = next_tx_id {
+        if let Some(policy) = state.resolve_policy(owner, service_id, current_tx_id) {
+            let (op, proto) = policy.config.fee_policy.split(gross_spent);
+            let res = policy.config.reserve_from_gross(gross_spent);
+            if op != operator_share || proto != protocol_fee || res != reserve_locked {
+                return Err(Error::SettlementConservationViolation);
+            }
+            (operator_share, protocol_fee, reserve_locked)
+        } else {
+            (operator_share, protocol_fee, reserve_locked)
+        }
+    } else {
+        (operator_share, protocol_fee, reserve_locked)
+    };
+    let mut settlement = Settlement::proposed(
+        id.clone(),
         gross_spent,
-        operator_share,
-        protocol_fee,
-        reserve_locked,
+        op_share,
+        proto_fee,
+        res_locked,
         evidence_hash.to_string(),
         from_tx_id,
         to_tx_id,
     );
+    if let Some(current_tx_id) = next_tx_id {
+        if let Some(policy) = state.resolve_policy(owner, service_id, current_tx_id) {
+            settlement.set_bound_policy(
+                policy.id.scope_key.clone(),
+                policy.id.version,
+                policy.config.dispute_policy.dispute_window_secs,
+            );
+        }
+    }
     state.insert_settlement(settlement);
     let signer_account = state.get_or_create_account(signer);
     signer_account.increment_nonce();
@@ -368,6 +414,7 @@ fn apply_finalize_settlement(
     service_id: &str,
     window_id: &str,
     signer: &str,
+    now: Option<u64>,
 ) -> Result<()> {
     let id = SettlementId::new(
         owner.to_string(),
@@ -378,6 +425,9 @@ fn apply_finalize_settlement(
         .get_settlement_mut(&id)
         .ok_or(Error::SettlementNotFound)?;
     s.finalize();
+    if let Some(t) = now {
+        s.set_finalized_at(t);
+    }
     let signer_account = state.get_or_create_account(signer);
     signer_account.increment_nonce();
     Ok(())
@@ -497,6 +547,52 @@ fn apply_resolve_dispute(
             .ok_or(Error::SettlementNotFound)?;
         s.reopen_after_dismissed();
     }
+    let signer_account = state.get_or_create_account(signer);
+    signer_account.increment_nonce();
+    Ok(())
+}
+
+fn apply_publish_policy_version(
+    state: &mut State,
+    scope: crate::state::PolicyScope,
+    version: u64,
+    effective_from_tx_id: u64,
+    config: crate::state::PolicyConfig,
+    signer: &str,
+    published_at: u64,
+) -> Result<()> {
+    let scope_key = scope.scope_key();
+    let id = PolicyVersionId {
+        scope_key: scope_key.clone(),
+        version,
+    };
+    let pv = PolicyVersion {
+        id: id.clone(),
+        scope,
+        effective_from_tx_id,
+        published_by: signer.to_string(),
+        published_at,
+        config,
+        status: PolicyVersionStatus::Published,
+    };
+    state.insert_policy_version(pv);
+    let signer_account = state.get_or_create_account(signer);
+    signer_account.increment_nonce();
+    Ok(())
+}
+
+fn apply_supersede_policy_version(
+    state: &mut State,
+    scope_key: &str,
+    version: u64,
+    signer: &str,
+) -> Result<()> {
+    let id = PolicyVersionId {
+        scope_key: scope_key.to_string(),
+        version,
+    };
+    let pv = state.get_policy_version_mut(&id).ok_or(Error::PolicyNotFound)?;
+    pv.status = PolicyVersionStatus::Superseded;
     let signer_account = state.get_or_create_account(signer);
     signer_account.increment_nonce();
     Ok(())

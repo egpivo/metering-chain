@@ -2,12 +2,17 @@ pub mod account;
 pub mod apply;
 pub mod hook;
 pub mod meter;
+pub mod policy;
 pub mod settlement;
 
 pub use account::Account;
 pub use apply::{apply, StateMachine};
 pub use hook::{Hook, NoOpHook};
 pub use meter::Meter;
+pub use policy::{
+    DisputePolicy, FeePolicy, PolicyConfig, PolicyScope, PolicyVersion, PolicyVersionId,
+    PolicyVersionStatus, ReservePolicy,
+};
 pub use settlement::{
     Claim, ClaimId, ClaimStatus, Dispute, DisputeId, DisputeStatus, Settlement, SettlementId,
     SettlementStatus,
@@ -67,6 +72,10 @@ pub struct State {
     /// Phase 4B: Disputes indexed by settlement_key (one open dispute per settlement)
     #[serde(default)]
     pub disputes: HashMap<String, Dispute>,
+
+    /// Phase 4C (G3): Policy versions indexed by (scope_key:version)
+    #[serde(default)]
+    pub policy_versions: HashMap<String, PolicyVersion>,
 }
 
 impl State {
@@ -80,6 +89,7 @@ impl State {
             settlements: HashMap::new(),
             claims: HashMap::new(),
             disputes: HashMap::new(),
+            policy_versions: HashMap::new(),
         }
     }
 
@@ -214,6 +224,46 @@ impl State {
     pub fn insert_dispute(&mut self, d: Dispute) {
         let key = d.id.key().to_string();
         self.disputes.insert(key, d);
+    }
+
+    /// Get policy version by id.
+    pub fn get_policy_version(&self, id: &PolicyVersionId) -> Option<&PolicyVersion> {
+        self.policy_versions.get(&id.key())
+    }
+
+    /// Get policy version mutably.
+    pub fn get_policy_version_mut(&mut self, id: &PolicyVersionId) -> Option<&mut PolicyVersion> {
+        self.policy_versions.get_mut(&id.key())
+    }
+
+    /// Insert or replace policy version.
+    pub fn insert_policy_version(&mut self, p: PolicyVersion) {
+        let key = p.id.key();
+        self.policy_versions.insert(key, p);
+    }
+
+    /// Resolve active policy for (owner, service_id) at current_tx_id.
+    /// Precedence: OwnerService > Owner > Global; highest version with effective_from_tx_id <= current_tx_id.
+    pub fn resolve_policy(
+        &self,
+        owner: &str,
+        service_id: &str,
+        current_tx_id: u64,
+    ) -> Option<&PolicyVersion> {
+        for scope in PolicyScope::scope_chain(owner, service_id) {
+            let scope_key = scope.scope_key();
+            let best = self
+                .policy_versions
+                .values()
+                .filter(|pv| pv.scope.scope_key() == scope_key)
+                .filter(|pv| pv.is_published())
+                .filter(|pv| pv.effective_from_tx_id <= current_tx_id)
+                .max_by_key(|pv| pv.id.version);
+            if let Some(pv) = best {
+                return Some(pv);
+            }
+        }
+        None
     }
 }
 

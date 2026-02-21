@@ -89,6 +89,19 @@ pub enum Transaction {
         window_id: String,
         verdict: DisputeVerdict,
     },
+    // --- Phase 4C (G3): Policy ---
+    /// Publish a policy version (authority/minter-signed).
+    PublishPolicyVersion {
+        scope: crate::state::PolicyScope,
+        version: u64,
+        effective_from_tx_id: u64,
+        config: crate::state::PolicyConfig,
+    },
+    /// Supersede a published policy version.
+    SupersedePolicyVersion {
+        scope_key: String,
+        version: u64,
+    },
 }
 
 /// Verdict for ResolveDispute (Phase 4B).

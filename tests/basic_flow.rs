@@ -1199,11 +1199,13 @@ fn test_phase3_live_context_requires_now_max_age() {
         mode: ValidationMode::Live,
         now: None,
         max_age: Some(300),
+        next_tx_id: None,
     };
     let ctx_no_max_age = ValidationContext {
         mode: ValidationMode::Live,
         now: Some(100),
         max_age: None,
+        next_tx_id: None,
     };
     assert!(metering_chain::tx::validation::validate(&state, &tx, &ctx_no_now, None).is_err());
     assert!(metering_chain::tx::validation::validate(&state, &tx, &ctx_no_max_age, None).is_err());
@@ -2885,6 +2887,662 @@ fn test_g2_resolve_dispute_upheld_keeps_payout_frozen() {
     assert!(
         res.is_err(),
         "PayClaim must remain rejected after Resolve Upheld; got {:?}",
+        res
+    );
+}
+
+// --- G3 Phase 4C: Policy ---
+
+/// G3: Publish global policy v1; new settlement uses v1 split and has bound policy snapshot.
+#[test]
+fn test_g3_publish_global_policy_v1_applies_to_new_settlements() {
+    use metering_chain::evidence;
+    use metering_chain::state::{PolicyConfig, PolicyScope, SettlementId};
+    use metering_chain::tx::validation::ValidationContext;
+
+    let minters = get_authorized_minters();
+    let mut state = State::new();
+    let rctx = replay_ctx();
+
+    // 1. Mint, open, consume (3 txs → next_tx_id = 3)
+    let tx1 = SignedTx::new(
+        "authority".to_string(),
+        0,
+        Transaction::Mint {
+            to: "alice".to_string(),
+            amount: 1000,
+        },
+    );
+    state = apply(&state, &tx1, &rctx, Some(&minters)).unwrap();
+    let tx2 = SignedTx::new(
+        "alice".to_string(),
+        0,
+        Transaction::OpenMeter {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            deposit: 100,
+        },
+    );
+    state = apply(&state, &tx2, &rctx, Some(&minters)).unwrap();
+    let tx3 = SignedTx::new(
+        "alice".to_string(),
+        1,
+        Transaction::Consume {
+            owner: "alice".to_string(),
+            service_id: "storage".to_string(),
+            units: 10,
+            pricing: Pricing::UnitPrice(5),
+        },
+    );
+    state = apply(&state, &tx3, &rctx, Some(&minters)).unwrap();
+    let gross_spent = 50u64;
+
+    // 2. Publish global policy: 90% operator, 10% protocol, dispute_window 3600, effective at tx_id 3
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let config = PolicyConfig {
+        fee_policy: metering_chain::state::FeePolicy {
+            operator_share_bps: 9000,
+            protocol_fee_bps: 1000,
+        },
+        reserve_policy: metering_chain::state::ReservePolicy::None,
+        dispute_policy: metering_chain::state::DisputePolicy {
+            dispute_window_secs: 3600,
+        },
+    };
+    assert!(config.validate());
+    let mut ctx_publish = ValidationContext::replay();
+    ctx_publish.next_tx_id = Some(3);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::PublishPolicyVersion {
+                scope: PolicyScope::Global,
+                version: 1,
+                effective_from_tx_id: 3,
+                config: config.clone(),
+            },
+        ),
+        &ctx_publish,
+        Some(&minters),
+    )
+    .unwrap();
+
+    // 3. Propose settlement with split matching policy (90% / 10%); use ctx with next_tx_id = 4 (after publish)
+    let operator_share = 45u64;
+    let protocol_fee = 5u64;
+    let reserve_locked = 0u64;
+    let ev_hash = evidence::evidence_hash(b"alice:storage:w1:0:3");
+    let sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w1".to_string());
+    let mut ctx_propose = ValidationContext::replay();
+    ctx_propose.next_tx_id = Some(4);
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::ProposeSettlement {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                from_tx_id: 0,
+                to_tx_id: 3,
+                gross_spent,
+                operator_share,
+                protocol_fee,
+                reserve_locked,
+                evidence_hash: ev_hash,
+            },
+        ),
+        &ctx_propose,
+        Some(&minters),
+    )
+    .unwrap();
+
+    let s = state.get_settlement(&sid).unwrap();
+    assert_eq!(s.gross_spent, gross_spent);
+    assert_eq!(s.operator_share, operator_share);
+    assert_eq!(s.protocol_fee, protocol_fee);
+    assert_eq!(
+        s.policy_scope_key.as_deref(),
+        Some("global"),
+        "Settlement must have bound policy snapshot"
+    );
+    assert_eq!(s.policy_version, Some(1));
+    assert_eq!(s.dispute_window_secs, Some(3600));
+}
+
+/// G3: OwnerService scope overrides Global.
+#[test]
+fn test_g3_owner_service_override_precedence() {
+    use metering_chain::evidence;
+    use metering_chain::state::{PolicyConfig, PolicyScope, SettlementId};
+    use metering_chain::tx::validation::ValidationContext;
+
+    let minters = get_authorized_minters();
+    let mut state = State::new();
+    let rctx = replay_ctx();
+
+    state = apply(
+        &state,
+        &SignedTx::new("authority".to_string(), 0, Transaction::Mint { to: "alice".to_string(), amount: 1000 }),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "alice".to_string(),
+            0,
+            Transaction::OpenMeter {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                deposit: 100,
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "alice".to_string(),
+            1,
+            Transaction::Consume {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                units: 10,
+                pricing: Pricing::UnitPrice(5),
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    let gross_spent = 50u64;
+
+    let global_cfg = PolicyConfig {
+        fee_policy: metering_chain::state::FeePolicy {
+            operator_share_bps: 5000,
+            protocol_fee_bps: 5000,
+        },
+        reserve_policy: metering_chain::state::ReservePolicy::None,
+        dispute_policy: metering_chain::state::DisputePolicy {
+            dispute_window_secs: 3600,
+        },
+    };
+    let mut ctx = ValidationContext::replay();
+    ctx.next_tx_id = Some(3);
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::PublishPolicyVersion {
+                scope: PolicyScope::Global,
+                version: 1,
+                effective_from_tx_id: 3,
+                config: global_cfg,
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+
+    let override_cfg = PolicyConfig {
+        fee_policy: metering_chain::state::FeePolicy {
+            operator_share_bps: 9000,
+            protocol_fee_bps: 1000,
+        },
+        reserve_policy: metering_chain::state::ReservePolicy::None,
+        dispute_policy: metering_chain::state::DisputePolicy {
+            dispute_window_secs: 7200,
+        },
+    };
+    ctx.next_tx_id = Some(4);
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::PublishPolicyVersion {
+                scope: PolicyScope::OwnerService {
+                    owner: "alice".to_string(),
+                    service_id: "storage".to_string(),
+                },
+                version: 1,
+                effective_from_tx_id: 4,
+                config: override_cfg,
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+
+    let sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w1".to_string());
+    let ev_hash = evidence::evidence_hash(b"alice:storage:w1:0:3");
+    ctx.next_tx_id = Some(5);
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::ProposeSettlement {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                from_tx_id: 0,
+                to_tx_id: 3,
+                gross_spent,
+                operator_share: 45,
+                protocol_fee: 5,
+                reserve_locked: 0,
+                evidence_hash: ev_hash,
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+
+    let s = state.get_settlement(&sid).unwrap();
+    assert_eq!(s.operator_share, 45);
+    assert_eq!(s.protocol_fee, 5);
+    assert_eq!(s.policy_scope_key.as_deref(), Some("owner_service:alice:storage"));
+    assert_eq!(s.dispute_window_secs, Some(7200));
+}
+
+/// G3: v2 effective at 5; propose at next_tx_id 4 uses v1.
+#[test]
+fn test_g3_future_effective_tx_id_uses_old_policy_before_cutover() {
+    use metering_chain::evidence;
+    use metering_chain::state::{PolicyConfig, PolicyScope, SettlementId};
+    use metering_chain::tx::validation::ValidationContext;
+
+    let minters = get_authorized_minters();
+    let mut state = State::new();
+    let rctx = replay_ctx();
+
+    state = apply(
+        &state,
+        &SignedTx::new("authority".to_string(), 0, Transaction::Mint { to: "alice".to_string(), amount: 1000 }),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "alice".to_string(),
+            0,
+            Transaction::OpenMeter {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                deposit: 100,
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "alice".to_string(),
+            1,
+            Transaction::Consume {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                units: 10,
+                pricing: Pricing::UnitPrice(5),
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    let gross_spent = 50u64;
+
+    let mut ctx = ValidationContext::replay();
+    ctx.next_tx_id = Some(3);
+    let c1 = PolicyConfig {
+        fee_policy: metering_chain::state::FeePolicy {
+            operator_share_bps: 9000,
+            protocol_fee_bps: 1000,
+        },
+        reserve_policy: metering_chain::state::ReservePolicy::None,
+        dispute_policy: metering_chain::state::DisputePolicy {
+            dispute_window_secs: 3600,
+        },
+    };
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::PublishPolicyVersion {
+                scope: PolicyScope::Global,
+                version: 1,
+                effective_from_tx_id: 3,
+                config: c1,
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+
+    ctx.next_tx_id = Some(4);
+    let sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w1".to_string());
+    let ev_hash = evidence::evidence_hash(b"alice:storage:w1:0:3");
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::ProposeSettlement {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w1".to_string(),
+                from_tx_id: 0,
+                to_tx_id: 3,
+                gross_spent,
+                operator_share: 45,
+                protocol_fee: 5,
+                reserve_locked: 0,
+                evidence_hash: ev_hash,
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+
+    let s = state.get_settlement(&sid).unwrap();
+    assert_eq!(s.policy_version, Some(1));
+    assert_eq!(s.operator_share, 45);
+
+    ctx.next_tx_id = Some(5);
+    let c2 = PolicyConfig {
+        fee_policy: metering_chain::state::FeePolicy {
+            operator_share_bps: 5000,
+            protocol_fee_bps: 5000,
+        },
+        reserve_policy: metering_chain::state::ReservePolicy::None,
+        dispute_policy: metering_chain::state::DisputePolicy {
+            dispute_window_secs: 3600,
+        },
+    };
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let _ = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::PublishPolicyVersion {
+                scope: PolicyScope::Global,
+                version: 2,
+                effective_from_tx_id: 5,
+                config: c2,
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+}
+
+/// G3: Dispute window from bound policy; beyond window rejected.
+#[test]
+fn test_g3_dispute_window_from_bound_policy_snapshot() {
+    use metering_chain::evidence;
+    use metering_chain::state::{PolicyConfig, PolicyScope, SettlementId};
+    use metering_chain::tx::validation::ValidationContext;
+
+    let minters = get_authorized_minters();
+    let mut state = State::new();
+    let rctx = replay_ctx();
+
+    state = apply(
+        &state,
+        &SignedTx::new("authority".to_string(), 0, Transaction::Mint { to: "alice".to_string(), amount: 1000 }),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "alice".to_string(),
+            0,
+            Transaction::OpenMeter {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                deposit: 100,
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "alice".to_string(),
+            1,
+            Transaction::Consume {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                units: 10,
+                pricing: Pricing::UnitPrice(5),
+            },
+        ),
+        &rctx,
+        Some(&minters),
+    )
+    .unwrap();
+
+    let cfg = PolicyConfig {
+        fee_policy: metering_chain::state::FeePolicy {
+            operator_share_bps: 9000,
+            protocol_fee_bps: 1000,
+        },
+        reserve_policy: metering_chain::state::ReservePolicy::None,
+        dispute_policy: metering_chain::state::DisputePolicy {
+            dispute_window_secs: 50,
+        },
+    };
+    let mut ctx = ValidationContext::replay();
+    ctx.next_tx_id = Some(3);
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::PublishPolicyVersion {
+                scope: PolicyScope::Global,
+                version: 1,
+                effective_from_tx_id: 3,
+                config: cfg,
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+
+    let ev_hash = evidence::evidence_hash(b"alice:storage:w2:0:3");
+    let _sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w2".to_string());
+    ctx.next_tx_id = Some(4);
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::ProposeSettlement {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w2".to_string(),
+                from_tx_id: 0,
+                to_tx_id: 3,
+                gross_spent: 50,
+                operator_share: 45,
+                protocol_fee: 5,
+                reserve_locked: 0,
+                evidence_hash: ev_hash,
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    )
+    .unwrap();
+
+    let mut live_ctx = ValidationContext::live(100, 300);
+    live_ctx.next_tx_id = Some(5);
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    state = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::FinalizeSettlement {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w2".to_string(),
+            },
+        ),
+        &live_ctx,
+        Some(&minters),
+    )
+    .unwrap();
+
+    let mut ctx_out = ValidationContext::live(151, 300);
+    ctx_out.next_tx_id = Some(6);
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let res = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::OpenDispute {
+                owner: "alice".to_string(),
+                service_id: "storage".to_string(),
+                window_id: "w2".to_string(),
+                reason_code: "test".to_string(),
+                evidence_hash: String::new(),
+            },
+        ),
+        &ctx_out,
+        Some(&minters),
+    );
+    assert!(
+        res.is_err(),
+        "OpenDispute must fail outside dispute window; got {:?}",
+        res
+    );
+}
+
+/// G3: Invalid publish (bps != 10000) → InvalidPolicyParameters.
+#[test]
+fn test_g3_invalid_publish_rejected_with_deterministic_error() {
+    use metering_chain::state::{PolicyConfig, PolicyScope};
+    use metering_chain::tx::validation::ValidationContext;
+
+    let minters = get_authorized_minters();
+    let state = State::new();
+    let mut ctx = ValidationContext::replay();
+    ctx.next_tx_id = Some(0);
+    let bad_cfg = PolicyConfig {
+        fee_policy: metering_chain::state::FeePolicy {
+            operator_share_bps: 8000,
+            protocol_fee_bps: 1000,
+        },
+        reserve_policy: metering_chain::state::ReservePolicy::None,
+        dispute_policy: metering_chain::state::DisputePolicy {
+            dispute_window_secs: 3600,
+        },
+    };
+    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let res = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            auth_n,
+            Transaction::PublishPolicyVersion {
+                scope: PolicyScope::Global,
+                version: 1,
+                effective_from_tx_id: 0,
+                config: bad_cfg,
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    );
+    assert!(
+        matches!(res, Err(Error::InvalidPolicyParameters)),
+        "expected InvalidPolicyParameters, got {:?}",
+        res
+    );
+}
+
+/// G3: effective_from_tx_id < next_tx_id → RetroactivePolicyForbidden.
+#[test]
+fn test_g3_retroactive_policy_forbidden() {
+    use metering_chain::state::{PolicyConfig, PolicyScope};
+    use metering_chain::tx::validation::ValidationContext;
+
+    let minters = get_authorized_minters();
+    let mut state = State::new();
+    state = apply(
+        &state,
+        &SignedTx::new("authority".to_string(), 0, Transaction::Mint { to: "alice".to_string(), amount: 100 }),
+        &replay_ctx(),
+        Some(&minters),
+    )
+    .unwrap();
+    let mut ctx = ValidationContext::replay();
+    ctx.next_tx_id = Some(1);
+    let cfg = PolicyConfig {
+        fee_policy: metering_chain::state::FeePolicy {
+            operator_share_bps: 9000,
+            protocol_fee_bps: 1000,
+        },
+        reserve_policy: metering_chain::state::ReservePolicy::None,
+        dispute_policy: metering_chain::state::DisputePolicy {
+            dispute_window_secs: 3600,
+        },
+    };
+    let res = apply(
+        &state,
+        &SignedTx::new(
+            "authority".to_string(),
+            0,
+            Transaction::PublishPolicyVersion {
+                scope: PolicyScope::Global,
+                version: 1,
+                effective_from_tx_id: 0,
+                config: cfg,
+            },
+        ),
+        &ctx,
+        Some(&minters),
+    );
+    assert!(
+        matches!(res, Err(Error::RetroactivePolicyForbidden)),
+        "expected RetroactivePolicyForbidden, got {:?}",
         res
     );
 }

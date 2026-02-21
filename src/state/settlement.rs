@@ -52,7 +52,7 @@ impl SettlementId {
     }
 }
 
-/// Settlement aggregate (Phase 4A).
+/// Settlement aggregate (Phase 4A). Phase 4C (G3): optional policy snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Settlement {
     pub id: SettlementId,
@@ -67,6 +67,16 @@ pub struct Settlement {
     pub to_tx_id: u64,
     /// Total amount already paid out via claims (cannot exceed operator_share).
     pub total_paid: u64,
+    /// G3: bound policy snapshot (when resolved at propose time).
+    #[serde(default)]
+    pub policy_scope_key: Option<String>,
+    #[serde(default)]
+    pub policy_version: Option<u64>,
+    #[serde(default)]
+    pub dispute_window_secs: Option<u64>,
+    /// G3: when settlement was finalized (epoch secs); used for dispute window.
+    #[serde(default)]
+    pub finalized_at: Option<u64>,
 }
 
 impl Settlement {
@@ -92,7 +102,28 @@ impl Settlement {
             from_tx_id,
             to_tx_id,
             total_paid: 0,
+            policy_scope_key: None,
+            policy_version: None,
+            dispute_window_secs: None,
+            finalized_at: None,
         }
+    }
+
+    /// G3: set bound policy snapshot (called from apply when policy was resolved).
+    pub fn set_bound_policy(
+        &mut self,
+        scope_key: String,
+        version: u64,
+        dispute_window_secs: u64,
+    ) {
+        self.policy_scope_key = Some(scope_key);
+        self.policy_version = Some(version);
+        self.dispute_window_secs = Some(dispute_window_secs);
+    }
+
+    /// G3: set finalized_at (epoch secs) when finalizing; used for dispute window.
+    pub fn set_finalized_at(&mut self, at: u64) {
+        self.finalized_at = Some(at);
     }
 
     pub fn payable(&self) -> u64 {

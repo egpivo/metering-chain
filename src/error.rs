@@ -35,6 +35,11 @@ impl Error {
             DisputeAlreadyOpen => "DISPUTE_ALREADY_OPEN",
             DisputeNotFound => "DISPUTE_NOT_FOUND",
             DisputeNotOpen => "DISPUTE_NOT_OPEN",
+            InvalidPolicyParameters => "INVALID_POLICY_PARAMETERS",
+            PolicyVersionConflict => "POLICY_VERSION_CONFLICT",
+            PolicyNotFound => "POLICY_NOT_FOUND",
+            PolicyNotEffective => "POLICY_NOT_EFFECTIVE",
+            RetroactivePolicyForbidden => "RETROACTIVE_POLICY_FORBIDDEN",
         }
     }
 }
@@ -122,6 +127,18 @@ pub enum Error {
     DisputeNotFound,
     #[error("Dispute not open (already resolved)")]
     DisputeNotOpen,
+
+    // Phase 4C (G3): Policy
+    #[error("Invalid policy parameters (e.g. bps sum != 10000 or dispute_window_secs == 0)")]
+    InvalidPolicyParameters,
+    #[error("Policy version conflict (duplicate scope:version)")]
+    PolicyVersionConflict,
+    #[error("Policy not found")]
+    PolicyNotFound,
+    #[error("Policy not effective at this tx_id")]
+    PolicyNotEffective,
+    #[error("Retroactive policy forbidden (effective_from_tx_id < next_tx_id)")]
+    RetroactivePolicyForbidden,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::state::{ClaimId, DisputeId, SettlementId, State};
+use crate::state::{ClaimId, DisputeId, PolicyVersionId, PolicyVersionStatus, SettlementId, State};
 use crate::tx::{Pricing, SignedTx, Transaction};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
@@ -19,6 +19,8 @@ pub struct ValidationContext {
     pub now: Option<u64>,
     /// Required when mode is Live for delegated consume; unused in Replay.
     pub max_age: Option<u64>,
+    /// Current next_tx_id (for G3: PublishPolicyVersion retroactive check). Set by caller when known.
+    pub next_tx_id: Option<u64>,
 }
 
 impl ValidationContext {
@@ -27,6 +29,7 @@ impl ValidationContext {
             mode: ValidationMode::Live,
             now: Some(now),
             max_age: Some(max_age),
+            next_tx_id: None,
         }
     }
 
@@ -35,6 +38,7 @@ impl ValidationContext {
             mode: ValidationMode::Replay,
             now: None,
             max_age: None,
+            next_tx_id: None,
         }
     }
 }
@@ -621,11 +625,19 @@ pub fn validate(
             Ok(None)
         }
         Transaction::OpenDispute { .. } => {
-            validate_open_dispute(state, tx, authorized_minters)?;
+            validate_open_dispute(state, tx, ctx, authorized_minters)?;
             Ok(None)
         }
         Transaction::ResolveDispute { .. } => {
             validate_resolve_dispute(state, tx, authorized_minters)?;
+            Ok(None)
+        }
+        Transaction::PublishPolicyVersion { .. } => {
+            validate_publish_policy_version(state, tx, ctx, authorized_minters)?;
+            Ok(None)
+        }
+        Transaction::SupersedePolicyVersion { .. } => {
+            validate_supersede_policy_version(state, tx, authorized_minters)?;
             Ok(None)
         }
     }
@@ -836,6 +848,7 @@ fn validate_pay_claim(
 fn validate_open_dispute(
     state: &State,
     tx: &SignedTx,
+    ctx: &ValidationContext,
     authorized_minters: Option<&std::collections::HashSet<String>>,
 ) -> Result<()> {
     let Transaction::OpenDispute {
@@ -874,6 +887,18 @@ fn validate_open_dispute(
         return Err(Error::InvalidTransaction(
             "OpenDispute: settlement must be finalized".to_string(),
         ));
+    }
+    if let (Some(window_secs), Some(finalized_at)) =
+        (s.dispute_window_secs, s.finalized_at)
+    {
+        if let Some(now) = ctx.now {
+            let deadline = finalized_at.saturating_add(window_secs);
+            if now > deadline {
+                return Err(Error::InvalidTransaction(
+                    "OpenDispute: outside dispute window".to_string(),
+                ));
+            }
+        }
     }
     let did = DisputeId::new(&sid);
     if let Some(d) = state.get_dispute(&did) {
@@ -921,6 +946,98 @@ fn validate_resolve_dispute(
     let d = state.get_dispute(&did).ok_or(Error::DisputeNotFound)?;
     if !d.is_open() {
         return Err(Error::DisputeNotOpen);
+    }
+    Ok(())
+}
+
+fn validate_publish_policy_version(
+    state: &State,
+    tx: &SignedTx,
+    ctx: &ValidationContext,
+    authorized_minters: Option<&std::collections::HashSet<String>>,
+) -> Result<()> {
+    let Transaction::PublishPolicyVersion {
+        scope,
+        version,
+        effective_from_tx_id,
+        config,
+    } = &tx.kind
+    else {
+        unreachable!()
+    };
+    if let Some(minters) = authorized_minters {
+        if !minters.contains(&tx.signer) {
+            return Err(Error::InvalidTransaction(format!(
+                "PublishPolicyVersion: signer {} must be authorized minter/admin",
+                tx.signer
+            )));
+        }
+    }
+    let expected_nonce = state
+        .get_account(&tx.signer)
+        .map(|a| a.nonce())
+        .unwrap_or(0);
+    if tx.nonce != expected_nonce {
+        return Err(Error::InvalidTransaction(format!(
+            "PublishPolicyVersion: Nonce mismatch for signer {}: expected {}, got {}",
+            tx.signer, expected_nonce, tx.nonce
+        )));
+    }
+    if !config.validate() {
+        return Err(Error::InvalidPolicyParameters);
+    }
+    let scope_key = scope.scope_key();
+    let id = PolicyVersionId {
+        scope_key: scope_key.clone(),
+        version: *version,
+    };
+    if state.get_policy_version(&id).is_some() {
+        return Err(Error::PolicyVersionConflict);
+    }
+    if let Some(next) = ctx.next_tx_id {
+        if *effective_from_tx_id < next {
+            return Err(Error::RetroactivePolicyForbidden);
+        }
+    }
+    Ok(())
+}
+
+fn validate_supersede_policy_version(
+    state: &State,
+    tx: &SignedTx,
+    authorized_minters: Option<&std::collections::HashSet<String>>,
+) -> Result<()> {
+    let Transaction::SupersedePolicyVersion { scope_key, version } = &tx.kind
+    else {
+        unreachable!()
+    };
+    if let Some(minters) = authorized_minters {
+        if !minters.contains(&tx.signer) {
+            return Err(Error::InvalidTransaction(format!(
+                "SupersedePolicyVersion: signer {} must be authorized minter/admin",
+                tx.signer
+            )));
+        }
+    }
+    let expected_nonce = state
+        .get_account(&tx.signer)
+        .map(|a| a.nonce())
+        .unwrap_or(0);
+    if tx.nonce != expected_nonce {
+        return Err(Error::InvalidTransaction(format!(
+            "SupersedePolicyVersion: Nonce mismatch for signer {}: expected {}, got {}",
+            tx.signer, expected_nonce, tx.nonce
+        )));
+    }
+    let id = PolicyVersionId {
+        scope_key: scope_key.clone(),
+        version: *version,
+    };
+    let pv = state.get_policy_version(&id).ok_or(Error::PolicyNotFound)?;
+    if pv.status != PolicyVersionStatus::Published {
+        return Err(Error::InvalidTransaction(
+            "SupersedePolicyVersion: target must be Published".to_string(),
+        ));
     }
     Ok(())
 }

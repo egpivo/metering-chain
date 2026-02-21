@@ -81,6 +81,12 @@ pub enum Commands {
         #[command(subcommand)]
         sub: SettlementSub,
     },
+
+    /// Phase 4C (G3): Policy commands
+    Policy {
+        #[command(subcommand)]
+        sub: PolicySub,
+    },
 }
 
 #[derive(Subcommand)]
@@ -299,6 +305,43 @@ pub enum SettlementSub {
     },
 }
 
+#[derive(Subcommand)]
+pub enum PolicySub {
+    /// Publish a policy version (authority/minter)
+    Publish {
+        #[arg(long)]
+        scope: String,
+        #[arg(long)]
+        version: u64,
+        #[arg(long)]
+        effective_from_tx_id: u64,
+        #[arg(long)]
+        operator_share_bps: u16,
+        #[arg(long)]
+        protocol_fee_bps: u16,
+        #[arg(long)]
+        dispute_window_secs: u64,
+        #[arg(long, default_value = "0")]
+        reserve_fixed: u64,
+        #[arg(long, default_value = "authority")]
+        signer: String,
+        #[arg(long)]
+        allow_unsigned: bool,
+    },
+    /// List policy versions (optional scope filter)
+    List {
+        #[arg(long)]
+        scope: Option<String>,
+    },
+    /// Show a policy version
+    Show {
+        #[arg(long)]
+        scope_key: String,
+        #[arg(long)]
+        version: u64,
+    },
+}
+
 /// Load state from storage by replaying transaction log to tip.
 pub fn load_or_create_state(storage: &FileStorage, _config: &Config) -> Result<(State, u64)> {
     replay::replay_to_tip(storage)
@@ -306,6 +349,33 @@ pub fn load_or_create_state(storage: &FileStorage, _config: &Config) -> Result<(
 
 fn get_wallets(config: &Config) -> metering_chain::wallet::Wallets {
     metering_chain::wallet::Wallets::new(config.get_wallets_path().clone())
+}
+
+/// Parse policy scope from CLI: "global" | "owner:alice" | "owner_service:alice:storage"
+fn parse_policy_scope(scope: &str) -> Result<metering_chain::state::PolicyScope> {
+    use metering_chain::state::PolicyScope;
+    let s = scope.trim();
+    if s.eq_ignore_ascii_case("global") {
+        return Ok(PolicyScope::Global);
+    }
+    if let Some(rest) = s.strip_prefix("owner:") {
+        return Ok(PolicyScope::Owner {
+            owner: rest.to_string(),
+        });
+    }
+    if let Some(rest) = s.strip_prefix("owner_service:") {
+        let parts: Vec<&str> = rest.splitn(2, ':').collect();
+        if parts.len() == 2 {
+            return Ok(PolicyScope::OwnerService {
+                owner: parts[0].to_string(),
+                service_id: parts[1].to_string(),
+            });
+        }
+    }
+    Err(Error::InvalidTransaction(format!(
+        "Invalid policy scope '{}'; use global, owner:ADDR, or owner_service:OWNER:SERVICE_ID",
+        scope
+    )))
 }
 
 /// Authorized minters: "authority" (legacy) + METERING_CHAIN_MINTERS env (comma-separated addresses).
@@ -715,7 +785,8 @@ pub fn run(cli: Cli) -> Result<()> {
 
                 let now = metering_chain::current_timestamp().max(0) as u64;
                 const DEFAULT_MAX_AGE: u64 = 300;
-                let live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                live_ctx.next_tx_id = Some(next_tx_id);
                 state = apply(&state, &signed_tx, &live_ctx, Some(&minters))?;
                 next_tx_id += 1;
                 storage.append_tx(&signed_tx)?;
@@ -770,7 +841,8 @@ pub fn run(cli: Cli) -> Result<()> {
 
                 let now = metering_chain::current_timestamp().max(0) as u64;
                 const DEFAULT_MAX_AGE: u64 = 300;
-                let live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                live_ctx.next_tx_id = Some(next_tx_id);
                 state = apply(&state, &signed_tx, &live_ctx, Some(&minters))?;
                 next_tx_id += 1;
                 storage.append_tx(&signed_tx)?;
@@ -1100,6 +1172,126 @@ pub fn run(cli: Cli) -> Result<()> {
                 Ok(())
             }
         },
+
+        Commands::Policy { sub } => {
+            let minters = get_authorized_minters(&config);
+            match sub {
+                PolicySub::Publish {
+                    scope,
+                    version,
+                    effective_from_tx_id,
+                    operator_share_bps,
+                    protocol_fee_bps,
+                    dispute_window_secs,
+                    reserve_fixed,
+                    signer,
+                    allow_unsigned,
+                } => {
+                    let (mut state, mut next_tx_id) = load_or_create_state(&storage, &config)?;
+                    let policy_scope = parse_policy_scope(&scope)?;
+                    let fee_policy = metering_chain::state::FeePolicy {
+                        operator_share_bps,
+                        protocol_fee_bps,
+                    };
+                    if !fee_policy.validate() {
+                        return Err(Error::InvalidPolicyParameters);
+                    }
+                    let reserve_policy = if reserve_fixed == 0 {
+                        metering_chain::state::ReservePolicy::None
+                    } else {
+                        metering_chain::state::ReservePolicy::Fixed {
+                            amount: reserve_fixed,
+                        }
+                    };
+                    let policy_config = metering_chain::state::PolicyConfig {
+                        fee_policy,
+                        reserve_policy,
+                        dispute_policy: metering_chain::state::DisputePolicy {
+                            dispute_window_secs,
+                        },
+                    };
+                    if !policy_config.validate() {
+                        return Err(Error::InvalidPolicyParameters);
+                    }
+                    let signer_nonce = state.get_account(&signer).map(|a| a.nonce()).unwrap_or(0);
+                    let tx = SignedTx::new(
+                        signer.clone(),
+                        signer_nonce,
+                        Transaction::PublishPolicyVersion {
+                            scope: policy_scope,
+                            version,
+                            effective_from_tx_id,
+                            config: policy_config.clone(),
+                        },
+                    );
+                    let signed_tx = if allow_unsigned {
+                        tx
+                    } else {
+                        get_wallets(&config)
+                            .sign_transaction(&signer, tx.nonce, tx.kind.clone())
+                            .map_err(|e| Error::SignatureVerification(e.to_string()))?
+                    };
+                    if signed_tx.signature.is_some() {
+                        wallet::verify_signature(&signed_tx)?;
+                    } else if !allow_unsigned && !minters.contains(&signer) {
+                        return Err(Error::SignatureVerification(
+                            "PublishPolicyVersion requires signed tx or --allow-unsigned".to_string(),
+                        ));
+                    }
+                    let now = metering_chain::current_timestamp().max(0) as u64;
+                    const DEFAULT_MAX_AGE: u64 = 300;
+                    let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                    live_ctx.next_tx_id = Some(next_tx_id);
+                    state = apply(&state, &signed_tx, &live_ctx, Some(&minters))?;
+                    next_tx_id += 1;
+                    storage.append_tx(&signed_tx)?;
+                    storage.persist_state(&state, next_tx_id)?;
+                    println!(
+                        "Policy published: {} version {}",
+                        policy_config.fee_policy.operator_share_bps,
+                        version
+                    );
+                    Ok(())
+                }
+                PolicySub::List { scope } => {
+                    let (state, _) = load_or_create_state(&storage, &config)?;
+                    let items: Vec<_> = state
+                        .policy_versions
+                        .values()
+                        .filter(|pv| {
+                            scope.as_ref().map_or(true, |s| pv.id.scope_key == *s)
+                        })
+                        .map(|pv| (pv.id.scope_key.clone(), pv.id.version, format!("{:?}", pv.status)))
+                        .collect();
+                    for (sk, ver, st) in items {
+                        println!("{}:{}  {}", sk, ver, st);
+                    }
+                    Ok(())
+                }
+                PolicySub::Show {
+                    scope_key,
+                    version,
+                } => {
+                    let (state, _) = load_or_create_state(&storage, &config)?;
+                    let id = metering_chain::state::PolicyVersionId {
+                        scope_key: scope_key.clone(),
+                        version,
+                    };
+                    let pv = state.get_policy_version(&id).ok_or(Error::PolicyNotFound)?;
+                    println!(
+                        "scope_key={} version={} effective_from_tx_id={} status={:?} operator_share_bps={} protocol_fee_bps={} dispute_window_secs={}",
+                        pv.id.scope_key,
+                        pv.id.version,
+                        pv.effective_from_tx_id,
+                        pv.status,
+                        pv.config.fee_policy.operator_share_bps,
+                        pv.config.fee_policy.protocol_fee_bps,
+                        pv.config.dispute_policy.dispute_window_secs
+                    );
+                    Ok(())
+                }
+            }
+        }
 
         Commands::Report { address } => {
             let (state, _) = load_or_create_state(&storage, &config)?;
