@@ -921,7 +921,8 @@ pub fn run(cli: Cli) -> Result<()> {
 
                 let now = metering_chain::current_timestamp().max(0) as u64;
                 const DEFAULT_MAX_AGE: u64 = 300;
-                let live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                live_ctx.next_tx_id = Some(next_tx_id);
                 state = replay::apply_with_replay_verifier(&storage, &state, &signed_tx, &live_ctx, None)?;
                 next_tx_id += 1;
                 storage.append_tx(&signed_tx)?;
@@ -986,7 +987,8 @@ pub fn run(cli: Cli) -> Result<()> {
 
                 let now = metering_chain::current_timestamp().max(0) as u64;
                 const DEFAULT_MAX_AGE: u64 = 300;
-                let live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                live_ctx.next_tx_id = Some(next_tx_id);
                 state = replay::apply_with_replay_verifier(&storage, &state, &signed_tx, &live_ctx, Some(&minters))?;
                 next_tx_id += 1;
                 storage.append_tx(&signed_tx)?;
@@ -1043,7 +1045,8 @@ pub fn run(cli: Cli) -> Result<()> {
                 }
                 let now = metering_chain::current_timestamp().max(0) as u64;
                 const DEFAULT_MAX_AGE: u64 = 300;
-                let live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                live_ctx.next_tx_id = Some(next_tx_id);
                 state = replay::apply_with_replay_verifier(&storage, &state, &signed_tx, &live_ctx, Some(&minters))?;
                 next_tx_id += 1;
                 storage.append_tx(&signed_tx)?;
