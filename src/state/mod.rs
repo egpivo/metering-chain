@@ -2,11 +2,21 @@ pub mod account;
 pub mod apply;
 pub mod hook;
 pub mod meter;
+pub mod policy;
+pub mod settlement;
 
 pub use account::Account;
 pub use apply::{apply, StateMachine};
 pub use hook::{Hook, NoOpHook};
 pub use meter::Meter;
+pub use policy::{
+    DisputePolicy, FeePolicy, PolicyConfig, PolicyScope, PolicyVersion, PolicyVersionId,
+    PolicyVersionStatus, ReservePolicy,
+};
+pub use settlement::{
+    Claim, ClaimId, ClaimStatus, Dispute, DisputeId, DisputeStatus, ResolutionAudit, Settlement,
+    SettlementId, SettlementStatus,
+};
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -31,7 +41,7 @@ pub struct CapabilityConsumption {
     pub consumed_cost: u64,
 }
 
-/// Core domain state: aggregates all accounts and meters
+/// Core domain state: aggregates all accounts, meters, settlements, claims.
 ///
 /// State is fully reconstructible by replaying transactions from genesis.
 /// All state transitions are deterministic and side-effect free.
@@ -50,6 +60,22 @@ pub struct State {
     /// Revoked capability IDs (owner-signed RevokeDelegation). Delegated Consume with this capability_id is rejected.
     #[serde(default)]
     pub revoked_capability_ids: HashSet<String>,
+
+    /// Phase 4A: Settlements indexed by (owner, service_id, window_id)
+    #[serde(default)]
+    pub settlements: HashMap<String, Settlement>,
+
+    /// Phase 4A: Claims indexed by (operator, settlement_key)
+    #[serde(default)]
+    pub claims: HashMap<String, Claim>,
+
+    /// Phase 4B: Disputes indexed by settlement_key (one open dispute per settlement)
+    #[serde(default)]
+    pub disputes: HashMap<String, Dispute>,
+
+    /// Phase 4C (G3): Policy versions indexed by (scope_key:version)
+    #[serde(default)]
+    pub policy_versions: HashMap<String, PolicyVersion>,
 }
 
 impl State {
@@ -60,6 +86,10 @@ impl State {
             meters: HashMap::new(),
             capability_consumption: HashMap::new(),
             revoked_capability_ids: HashSet::new(),
+            settlements: HashMap::new(),
+            claims: HashMap::new(),
+            disputes: HashMap::new(),
+            policy_versions: HashMap::new(),
         }
     }
 
@@ -146,6 +176,135 @@ impl State {
             .values()
             .filter(|m| m.owner == owner && m.active)
             .collect()
+    }
+
+    /// Get settlement by id (owner, service_id, window_id).
+    pub fn get_settlement(&self, id: &SettlementId) -> Option<&Settlement> {
+        self.settlements.get(&id.key())
+    }
+
+    /// Get settlement mutably.
+    pub fn get_settlement_mut(&mut self, id: &SettlementId) -> Option<&mut Settlement> {
+        self.settlements.get_mut(&id.key())
+    }
+
+    /// Insert settlement.
+    pub fn insert_settlement(&mut self, s: Settlement) {
+        let key = s.id.key();
+        self.settlements.insert(key, s);
+    }
+
+    /// Get claim by id.
+    pub fn get_claim(&self, id: &ClaimId) -> Option<&Claim> {
+        self.claims.get(&id.key())
+    }
+
+    /// Get claim mutably.
+    pub fn get_claim_mut(&mut self, id: &ClaimId) -> Option<&mut Claim> {
+        self.claims.get_mut(&id.key())
+    }
+
+    /// Insert claim.
+    pub fn insert_claim(&mut self, c: Claim) {
+        let key = c.id.key().to_string();
+        self.claims.insert(key, c);
+    }
+
+    /// Get dispute by id (settlement_key).
+    pub fn get_dispute(&self, id: &DisputeId) -> Option<&Dispute> {
+        self.disputes.get(id.key())
+    }
+
+    /// Get dispute mutably.
+    pub fn get_dispute_mut(&mut self, id: &DisputeId) -> Option<&mut Dispute> {
+        self.disputes.get_mut(id.key())
+    }
+
+    /// Insert or replace dispute.
+    pub fn insert_dispute(&mut self, d: Dispute) {
+        let key = d.id.key().to_string();
+        self.disputes.insert(key, d);
+    }
+
+    /// Get policy version by id.
+    pub fn get_policy_version(&self, id: &PolicyVersionId) -> Option<&PolicyVersion> {
+        self.policy_versions.get(&id.key())
+    }
+
+    /// Get policy version mutably.
+    pub fn get_policy_version_mut(&mut self, id: &PolicyVersionId) -> Option<&mut PolicyVersion> {
+        self.policy_versions.get_mut(&id.key())
+    }
+
+    /// Insert or replace policy version.
+    pub fn insert_policy_version(&mut self, p: PolicyVersion) {
+        let key = p.id.key();
+        self.policy_versions.insert(key, p);
+    }
+
+    /// Resolve active policy for (owner, service_id) at current_tx_id.
+    /// Precedence: OwnerService > Owner > Global; highest version with effective_from_tx_id <= current_tx_id.
+    pub fn resolve_policy(
+        &self,
+        owner: &str,
+        service_id: &str,
+        current_tx_id: u64,
+    ) -> Option<&PolicyVersion> {
+        for scope in PolicyScope::scope_chain(owner, service_id) {
+            let scope_key = scope.scope_key();
+            let best = self
+                .policy_versions
+                .values()
+                .filter(|pv| pv.scope.scope_key() == scope_key)
+                .filter(|pv| pv.is_published())
+                .filter(|pv| pv.effective_from_tx_id <= current_tx_id)
+                .max_by_key(|pv| pv.id.version);
+            if let Some(pv) = best {
+                return Some(pv);
+            }
+        }
+        None
+    }
+
+    /// Return the scope chain for (owner, service_id) in precedence order for debugging/audit.
+    /// Order: OwnerService, Owner, Global.
+    pub fn resolve_scope_chain(&self, owner: &str, service_id: &str) -> Vec<PolicyScope> {
+        PolicyScope::scope_chain(owner, service_id)
+    }
+
+    /// Latest version number for a scope (max version with this scope_key). None if no versions.
+    pub fn latest_policy_version_for_scope(&self, scope_key: &str) -> Option<u64> {
+        self.policy_versions
+            .values()
+            .filter(|pv| pv.id.scope_key == scope_key)
+            .map(|pv| pv.id.version)
+            .max()
+    }
+
+    /// G4: resolution audit for a dispute (if resolved with evidence).
+    pub fn get_dispute_resolution_audit(
+        &self,
+        settlement_id: &SettlementId,
+    ) -> Option<&ResolutionAudit> {
+        let did = DisputeId::new(settlement_id);
+        self.get_dispute(&did)?.resolution_audit.as_ref()
+    }
+
+    /// G4: build evidence bundle for a settlement from settlement + resolution audit (if resolved).
+    pub fn get_evidence_bundle(
+        &self,
+        settlement_id: &SettlementId,
+    ) -> Option<crate::evidence::EvidenceBundle> {
+        let s = self.get_settlement(settlement_id)?;
+        let audit = self.get_dispute_resolution_audit(settlement_id)?;
+        Some(crate::evidence::EvidenceBundle {
+            settlement_key: settlement_id.key(),
+            from_tx_id: s.from_tx_id,
+            to_tx_id: s.to_tx_id,
+            evidence_hash: s.evidence_hash.clone(),
+            replay_hash: audit.replay_hash.clone(),
+            replay_summary: audit.replay_summary.clone(),
+        })
     }
 }
 

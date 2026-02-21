@@ -1,11 +1,12 @@
 use clap::{Parser, Subcommand};
 use metering_chain::config::Config;
 use metering_chain::error::{Error, Result};
+use metering_chain::evidence;
 use metering_chain::replay;
-use metering_chain::state::{apply, State};
+use metering_chain::state::{SettlementId, State};
 use metering_chain::storage::{FileStorage, Storage};
 use metering_chain::tx::validation::ValidationContext;
-use metering_chain::tx::SignedTx;
+use metering_chain::tx::{DisputeVerdict, SignedTx, Transaction};
 use metering_chain::wallet;
 use std::collections::HashSet;
 use std::fs;
@@ -73,6 +74,18 @@ pub enum Commands {
     Report {
         /// Account address (optional, shows all if not provided)
         address: Option<String>,
+    },
+
+    /// Phase 4A: Settlement commands
+    Settlement {
+        #[command(subcommand)]
+        sub: SettlementSub,
+    },
+
+    /// Phase 4C (G3): Policy commands
+    Policy {
+        #[command(subcommand)]
+        sub: PolicySub,
     },
 }
 
@@ -177,6 +190,176 @@ pub enum WalletSub {
     },
 }
 
+#[derive(Subcommand)]
+pub enum SettlementSub {
+    /// Propose settlement (compute gross_spent from tx log)
+    Propose {
+        #[arg(long)]
+        owner: String,
+        #[arg(long)]
+        service_id: String,
+        #[arg(long)]
+        window_id: String,
+        #[arg(long)]
+        from_tx_id: u64,
+        #[arg(long)]
+        to_tx_id: u64,
+        /// Signer address (default: authority). Must be minter.
+        #[arg(long, default_value = "authority")]
+        signer: String,
+        #[arg(long)]
+        allow_unsigned: bool,
+    },
+    /// Finalize a proposed settlement
+    Finalize {
+        #[arg(long)]
+        owner: String,
+        #[arg(long)]
+        service_id: String,
+        #[arg(long)]
+        window_id: String,
+        #[arg(long, default_value = "authority")]
+        signer: String,
+        #[arg(long)]
+        allow_unsigned: bool,
+    },
+    /// Submit claim (operator-signed)
+    SubmitClaim {
+        #[arg(long)]
+        operator: String,
+        #[arg(long)]
+        owner: String,
+        #[arg(long)]
+        service_id: String,
+        #[arg(long)]
+        window_id: String,
+        #[arg(long)]
+        amount: u64,
+        #[arg(long)]
+        allow_unsigned: bool,
+    },
+    /// Pay a pending claim (protocol/admin-signed)
+    PayClaim {
+        #[arg(long)]
+        operator: String,
+        #[arg(long)]
+        owner: String,
+        #[arg(long)]
+        service_id: String,
+        #[arg(long)]
+        window_id: String,
+        #[arg(long, default_value = "authority")]
+        signer: String,
+        #[arg(long)]
+        allow_unsigned: bool,
+    },
+    /// Open a dispute on a finalized settlement (freezes payouts)
+    OpenDispute {
+        #[arg(long)]
+        owner: String,
+        #[arg(long)]
+        service_id: String,
+        #[arg(long)]
+        window_id: String,
+        #[arg(long, default_value = "")]
+        reason_code: String,
+        #[arg(long, default_value = "")]
+        evidence_hash: String,
+        #[arg(long, default_value = "authority")]
+        signer: String,
+        #[arg(long)]
+        allow_unsigned: bool,
+    },
+    /// Resolve an open dispute (verdict: upheld | dismissed)
+    ResolveDispute {
+        #[arg(long)]
+        owner: String,
+        #[arg(long)]
+        service_id: String,
+        #[arg(long)]
+        window_id: String,
+        #[arg(long)]
+        verdict: String,
+        #[arg(long, default_value = "authority")]
+        signer: String,
+        #[arg(long)]
+        allow_unsigned: bool,
+    },
+    /// List settlements
+    List {
+        #[arg(long)]
+        owner: Option<String>,
+        #[arg(long)]
+        service_id: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+    },
+    /// Show settlement detail (includes G4 evidence/replay when dispute was resolved)
+    Show {
+        #[arg(long)]
+        owner: String,
+        #[arg(long)]
+        service_id: String,
+        #[arg(long)]
+        window_id: String,
+    },
+    /// Show dispute for a settlement (G4)
+    DisputeShow {
+        #[arg(long)]
+        owner: String,
+        #[arg(long)]
+        service_id: String,
+        #[arg(long)]
+        window_id: String,
+    },
+    /// Show evidence bundle for a settlement (G4: replay_hash, replay_summary, evidence_hash)
+    EvidenceShow {
+        #[arg(long)]
+        owner: String,
+        #[arg(long)]
+        service_id: String,
+        #[arg(long)]
+        window_id: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum PolicySub {
+    /// Publish a policy version (authority/minter)
+    Publish {
+        #[arg(long)]
+        scope: String,
+        #[arg(long)]
+        version: u64,
+        #[arg(long)]
+        effective_from_tx_id: u64,
+        #[arg(long)]
+        operator_share_bps: u16,
+        #[arg(long)]
+        protocol_fee_bps: u16,
+        #[arg(long)]
+        dispute_window_secs: u64,
+        #[arg(long, default_value = "0")]
+        reserve_fixed: u64,
+        #[arg(long, default_value = "authority")]
+        signer: String,
+        #[arg(long)]
+        allow_unsigned: bool,
+    },
+    /// List policy versions (optional scope filter)
+    List {
+        #[arg(long)]
+        scope: Option<String>,
+    },
+    /// Show a policy version
+    Show {
+        #[arg(long)]
+        scope_key: String,
+        #[arg(long)]
+        version: u64,
+    },
+}
+
 /// Load state from storage by replaying transaction log to tip.
 pub fn load_or_create_state(storage: &FileStorage, _config: &Config) -> Result<(State, u64)> {
     replay::replay_to_tip(storage)
@@ -184,6 +367,33 @@ pub fn load_or_create_state(storage: &FileStorage, _config: &Config) -> Result<(
 
 fn get_wallets(config: &Config) -> metering_chain::wallet::Wallets {
     metering_chain::wallet::Wallets::new(config.get_wallets_path().clone())
+}
+
+/// Parse policy scope from CLI: "global" | "owner:alice" | "owner_service:alice:storage"
+fn parse_policy_scope(scope: &str) -> Result<metering_chain::state::PolicyScope> {
+    use metering_chain::state::PolicyScope;
+    let s = scope.trim();
+    if s.eq_ignore_ascii_case("global") {
+        return Ok(PolicyScope::Global);
+    }
+    if let Some(rest) = s.strip_prefix("owner:") {
+        return Ok(PolicyScope::Owner {
+            owner: rest.to_string(),
+        });
+    }
+    if let Some(rest) = s.strip_prefix("owner_service:") {
+        let parts: Vec<&str> = rest.splitn(2, ':').collect();
+        if parts.len() == 2 {
+            return Ok(PolicyScope::OwnerService {
+                owner: parts[0].to_string(),
+                service_id: parts[1].to_string(),
+            });
+        }
+    }
+    Err(Error::InvalidTransaction(format!(
+        "Invalid policy scope '{}'; use global, owner:ADDR, or owner_service:OWNER:SERVICE_ID",
+        scope
+    )))
 }
 
 /// Authorized minters: "authority" (legacy) + METERING_CHAIN_MINTERS env (comma-separated addresses).
@@ -292,7 +502,8 @@ pub fn run(cli: Cli) -> Result<()> {
 
             let now = metering_chain::current_timestamp().max(0) as u64;
             const DEFAULT_MAX_AGE: u64 = 300;
-            let live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+            let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+            live_ctx.next_tx_id = Some(next_tx_id);
 
             // Validate transaction
             let cost_opt = metering_chain::tx::validation::validate(
@@ -310,8 +521,14 @@ pub fn run(cli: Cli) -> Result<()> {
                 return Ok(());
             }
 
-            // Apply transaction
-            state = apply(&state, &signed_tx, &live_ctx, Some(&minters))?;
+            // Apply transaction (G4: ResolveDispute verified via apply_with_replay_verifier)
+            state = replay::apply_with_replay_verifier(
+                &storage,
+                &state,
+                &signed_tx,
+                &live_ctx,
+                Some(&minters),
+            )?;
             next_tx_id += 1;
 
             // Persist transaction and state
@@ -509,6 +726,715 @@ pub fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
 
+        Commands::Settlement { sub } => match sub {
+            SettlementSub::Propose {
+                owner,
+                service_id,
+                window_id,
+                from_tx_id,
+                to_tx_id,
+                signer,
+                allow_unsigned,
+            } => {
+                let (mut state, mut next_tx_id) = load_or_create_state(&storage, &config)?;
+                if to_tx_id <= from_tx_id {
+                    return Err(Error::InvalidTransaction(
+                        "to_tx_id must be greater than from_tx_id".to_string(),
+                    ));
+                }
+                if to_tx_id > next_tx_id {
+                    return Err(Error::InvalidTransaction(format!(
+                        "to_tx_id {} exceeds log tip (next tx id {}); window must be within applied txs",
+                        to_tx_id, next_tx_id
+                    )));
+                }
+                let state_to = replay::replay_up_to(&storage, to_tx_id)?;
+                let state_from = replay::replay_up_to(&storage, from_tx_id)?;
+                let gross_to = state_to
+                    .get_meter(&owner, &service_id)
+                    .map(|m| m.total_spent())
+                    .unwrap_or(0);
+                let gross_from = state_from
+                    .get_meter(&owner, &service_id)
+                    .map(|m| m.total_spent())
+                    .unwrap_or(0);
+                let gross_spent = gross_to.saturating_sub(gross_from);
+                if gross_spent == 0 {
+                    return Err(Error::InvalidTransaction(
+                        "No usage in window: gross_spent is 0".to_string(),
+                    ));
+                }
+                let (operator_share, protocol_fee, reserve_locked) =
+                    if let Some(policy) = state.resolve_policy(&owner, &service_id, next_tx_id) {
+                        let (op, proto) = policy.config.fee_policy.split(gross_spent);
+                        let res = policy.config.reserve_from_gross(gross_spent);
+                        (op, proto, res)
+                    } else {
+                        let op = (gross_spent * 90) / 100;
+                        let proto = gross_spent.saturating_sub(op);
+                        (op, proto, 0u64)
+                    };
+                let txs_in_window = replay::load_tx_slice(&storage, from_tx_id)?;
+                let txs_slice: Vec<_> = txs_in_window
+                    .into_iter()
+                    .take((to_tx_id - from_tx_id) as usize)
+                    .collect();
+                let evidence_hash = evidence::tx_slice_hash(&txs_slice);
+
+                let signer_nonce = state.get_account(&signer).map(|a| a.nonce()).unwrap_or(0);
+
+                let tx_propose = SignedTx::new(
+                    signer.clone(),
+                    signer_nonce,
+                    Transaction::ProposeSettlement {
+                        owner: owner.clone(),
+                        service_id: service_id.clone(),
+                        window_id: window_id.clone(),
+                        from_tx_id,
+                        to_tx_id,
+                        gross_spent,
+                        operator_share,
+                        protocol_fee,
+                        reserve_locked,
+                        evidence_hash: evidence_hash.clone(),
+                    },
+                );
+                let signed_tx = if allow_unsigned {
+                    tx_propose
+                } else {
+                    get_wallets(&config)
+                        .sign_transaction(&signer, tx_propose.nonce, tx_propose.kind.clone())
+                        .map_err(|e| Error::SignatureVerification(e.to_string()))?
+                };
+                if signed_tx.signature.is_some() {
+                    wallet::verify_signature(&signed_tx)?;
+                } else if !allow_unsigned && !minters.contains(&signer) {
+                    return Err(Error::SignatureVerification(
+                        "Propose requires signed tx or --allow-unsigned".to_string(),
+                    ));
+                }
+
+                let now = metering_chain::current_timestamp().max(0) as u64;
+                const DEFAULT_MAX_AGE: u64 = 300;
+                let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                live_ctx.next_tx_id = Some(next_tx_id);
+                state = replay::apply_with_replay_verifier(
+                    &storage,
+                    &state,
+                    &signed_tx,
+                    &live_ctx,
+                    Some(&minters),
+                )?;
+                next_tx_id += 1;
+                storage.append_tx(&signed_tx)?;
+                storage.persist_state(&state, next_tx_id)?;
+
+                let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
+                let s = state.get_settlement(&sid).unwrap();
+                let output = SettlementProposeOutput {
+                    settlement_id: sid.key(),
+                    status: format!("{:?}", s.status),
+                    gross_spent: s.gross_spent,
+                    operator_share: s.operator_share,
+                    protocol_fee: s.protocol_fee,
+                };
+                println!("{}", format_output(&output, &cli.format)?);
+                Ok(())
+            }
+            SettlementSub::Finalize {
+                owner,
+                service_id,
+                window_id,
+                signer,
+                allow_unsigned,
+            } => {
+                let (mut state, mut next_tx_id) = load_or_create_state(&storage, &config)?;
+                let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
+                let signer_nonce = state.get_account(&signer).map(|a| a.nonce()).unwrap_or(0);
+
+                let tx_finalize = SignedTx::new(
+                    signer.clone(),
+                    signer_nonce,
+                    Transaction::FinalizeSettlement {
+                        owner: owner.clone(),
+                        service_id: service_id.clone(),
+                        window_id: window_id.clone(),
+                    },
+                );
+                let signed_tx = if allow_unsigned {
+                    tx_finalize
+                } else {
+                    get_wallets(&config)
+                        .sign_transaction(&signer, tx_finalize.nonce, tx_finalize.kind.clone())
+                        .map_err(|e| Error::SignatureVerification(e.to_string()))?
+                };
+                if signed_tx.signature.is_some() {
+                    wallet::verify_signature(&signed_tx)?;
+                } else if !allow_unsigned && !minters.contains(&signer) {
+                    return Err(Error::SignatureVerification(
+                        "Finalize requires signed tx or --allow-unsigned".to_string(),
+                    ));
+                }
+
+                let now = metering_chain::current_timestamp().max(0) as u64;
+                const DEFAULT_MAX_AGE: u64 = 300;
+                let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                live_ctx.next_tx_id = Some(next_tx_id);
+                state = replay::apply_with_replay_verifier(
+                    &storage,
+                    &state,
+                    &signed_tx,
+                    &live_ctx,
+                    Some(&minters),
+                )?;
+                next_tx_id += 1;
+                storage.append_tx(&signed_tx)?;
+                storage.persist_state(&state, next_tx_id)?;
+
+                let s = state.get_settlement(&sid).unwrap();
+                let output = SettlementFinalizeOutput {
+                    settlement_id: sid.key(),
+                    status: format!("{:?}", s.status),
+                    payable: s.payable(),
+                };
+                println!("{}", format_output(&output, &cli.format)?);
+                Ok(())
+            }
+            SettlementSub::SubmitClaim {
+                operator,
+                owner,
+                service_id,
+                window_id,
+                amount,
+                allow_unsigned,
+            } => {
+                let (mut state, mut next_tx_id) = load_or_create_state(&storage, &config)?;
+                let signer_nonce = state.get_account(&operator).map(|a| a.nonce()).unwrap_or(0);
+
+                let tx_claim = SignedTx::new(
+                    operator.clone(),
+                    signer_nonce,
+                    Transaction::SubmitClaim {
+                        operator: operator.clone(),
+                        owner: owner.clone(),
+                        service_id: service_id.clone(),
+                        window_id: window_id.clone(),
+                        claim_amount: amount,
+                    },
+                );
+                let signed_tx = if allow_unsigned {
+                    tx_claim
+                } else {
+                    get_wallets(&config)
+                        .sign_transaction(&operator, tx_claim.nonce, tx_claim.kind.clone())
+                        .map_err(|e| Error::SignatureVerification(e.to_string()))?
+                };
+                if signed_tx.signature.is_some() {
+                    wallet::verify_signature(&signed_tx)?;
+                } else if !allow_unsigned {
+                    return Err(Error::SignatureVerification(
+                        "SubmitClaim requires signed tx or --allow-unsigned".to_string(),
+                    ));
+                }
+
+                let now = metering_chain::current_timestamp().max(0) as u64;
+                const DEFAULT_MAX_AGE: u64 = 300;
+                let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                live_ctx.next_tx_id = Some(next_tx_id);
+                state = replay::apply_with_replay_verifier(
+                    &storage, &state, &signed_tx, &live_ctx, None,
+                )?;
+                next_tx_id += 1;
+                storage.append_tx(&signed_tx)?;
+                storage.persist_state(&state, next_tx_id)?;
+
+                let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
+                let cid = metering_chain::state::ClaimId::new(operator.clone(), &sid);
+                let c = state.get_claim(&cid).unwrap();
+                let output = ClaimSubmitOutput {
+                    claim_id: cid.key(),
+                    status: format!("{:?}", c.status),
+                    claim_amount: c.claim_amount,
+                };
+                println!("{}", format_output(&output, &cli.format)?);
+                Ok(())
+            }
+            SettlementSub::PayClaim {
+                operator,
+                owner,
+                service_id,
+                window_id,
+                signer,
+                allow_unsigned,
+            } => {
+                let (mut state, mut next_tx_id) = load_or_create_state(&storage, &config)?;
+                let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
+                let cid = metering_chain::state::ClaimId::new(operator.clone(), &sid);
+                let claim_amount = state
+                    .get_claim(&cid)
+                    .ok_or(Error::ClaimNotPending)?
+                    .claim_amount;
+                let signer_nonce = state.get_account(&signer).map(|a| a.nonce()).unwrap_or(0);
+                let operator_bal_before = state
+                    .get_account(&operator)
+                    .map(|a| a.balance())
+                    .unwrap_or(0);
+
+                let tx_pay = SignedTx::new(
+                    signer.clone(),
+                    signer_nonce,
+                    Transaction::PayClaim {
+                        operator: operator.clone(),
+                        owner: owner.clone(),
+                        service_id: service_id.clone(),
+                        window_id: window_id.clone(),
+                    },
+                );
+                let signed_tx = if allow_unsigned {
+                    tx_pay
+                } else {
+                    get_wallets(&config)
+                        .sign_transaction(&signer, tx_pay.nonce, tx_pay.kind.clone())
+                        .map_err(|e| Error::SignatureVerification(e.to_string()))?
+                };
+                if signed_tx.signature.is_some() {
+                    wallet::verify_signature(&signed_tx)?;
+                } else if !allow_unsigned && !minters.contains(&signer) {
+                    return Err(Error::SignatureVerification(
+                        "PayClaim requires signed tx or --allow-unsigned".to_string(),
+                    ));
+                }
+
+                let now = metering_chain::current_timestamp().max(0) as u64;
+                const DEFAULT_MAX_AGE: u64 = 300;
+                let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                live_ctx.next_tx_id = Some(next_tx_id);
+                state = replay::apply_with_replay_verifier(
+                    &storage,
+                    &state,
+                    &signed_tx,
+                    &live_ctx,
+                    Some(&minters),
+                )?;
+                next_tx_id += 1;
+                storage.append_tx(&signed_tx)?;
+                storage.persist_state(&state, next_tx_id)?;
+
+                let operator_bal_after = state
+                    .get_account(&operator)
+                    .map(|a| a.balance())
+                    .unwrap_or(0);
+                let output = ClaimPayOutput {
+                    claim_id: cid.key(),
+                    status: "Paid",
+                    amount_paid: claim_amount,
+                    operator_balance_delta: operator_bal_after.saturating_sub(operator_bal_before),
+                };
+                println!("{}", format_output(&output, &cli.format)?);
+                Ok(())
+            }
+            SettlementSub::OpenDispute {
+                owner,
+                service_id,
+                window_id,
+                reason_code,
+                evidence_hash,
+                signer,
+                allow_unsigned,
+            } => {
+                let (mut state, mut next_tx_id) = load_or_create_state(&storage, &config)?;
+                let signer_nonce = state.get_account(&signer).map(|a| a.nonce()).unwrap_or(0);
+                let tx_open = SignedTx::new(
+                    signer.clone(),
+                    signer_nonce,
+                    Transaction::OpenDispute {
+                        owner: owner.clone(),
+                        service_id: service_id.clone(),
+                        window_id: window_id.clone(),
+                        reason_code: reason_code.clone(),
+                        evidence_hash: evidence_hash.clone(),
+                    },
+                );
+                let signed_tx = if allow_unsigned {
+                    tx_open
+                } else {
+                    get_wallets(&config)
+                        .sign_transaction(&signer, tx_open.nonce, tx_open.kind.clone())
+                        .map_err(|e| Error::SignatureVerification(e.to_string()))?
+                };
+                if signed_tx.signature.is_some() {
+                    wallet::verify_signature(&signed_tx)?;
+                } else if !allow_unsigned && !minters.contains(&signer) {
+                    return Err(Error::SignatureVerification(
+                        "OpenDispute requires signed tx or --allow-unsigned".to_string(),
+                    ));
+                }
+                let now = metering_chain::current_timestamp().max(0) as u64;
+                const DEFAULT_MAX_AGE: u64 = 300;
+                let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                live_ctx.next_tx_id = Some(next_tx_id);
+                state = replay::apply_with_replay_verifier(
+                    &storage,
+                    &state,
+                    &signed_tx,
+                    &live_ctx,
+                    Some(&minters),
+                )?;
+                next_tx_id += 1;
+                storage.append_tx(&signed_tx)?;
+                storage.persist_state(&state, next_tx_id)?;
+                let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
+                let s = state.get_settlement(&sid).unwrap();
+                println!(
+                    "Dispute opened. Settlement {} status: {:?}",
+                    sid.key(),
+                    s.status
+                );
+                Ok(())
+            }
+            SettlementSub::ResolveDispute {
+                owner,
+                service_id,
+                window_id,
+                verdict,
+                signer,
+                allow_unsigned,
+            } => {
+                let (mut state, mut next_tx_id) = load_or_create_state(&storage, &config)?;
+                let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
+                let settlement = state
+                    .get_settlement(&sid)
+                    .ok_or(Error::SettlementNotFound)?;
+                let (replay_summary, _evidence_hash) =
+                    metering_chain::replay::replay_slice_to_summary(
+                        &storage,
+                        settlement.from_tx_id,
+                        settlement.to_tx_id,
+                        &owner,
+                        &service_id,
+                        settlement.operator_share,
+                        settlement.protocol_fee,
+                        settlement.reserve_locked,
+                    )?;
+                let replay_hash = replay_summary.replay_hash();
+                let verdict_enum = match verdict.to_lowercase().as_str() {
+                    "upheld" => DisputeVerdict::Upheld,
+                    "dismissed" => DisputeVerdict::Dismissed,
+                    _ => {
+                        return Err(Error::InvalidTransaction(format!(
+                            "verdict must be 'upheld' or 'dismissed', got '{}'",
+                            verdict
+                        )));
+                    }
+                };
+                let signer_nonce = state.get_account(&signer).map(|a| a.nonce()).unwrap_or(0);
+                let tx_resolve = SignedTx::new(
+                    signer.clone(),
+                    signer_nonce,
+                    Transaction::ResolveDispute {
+                        owner: owner.clone(),
+                        service_id: service_id.clone(),
+                        window_id: window_id.clone(),
+                        verdict: verdict_enum,
+                        evidence_hash: settlement.evidence_hash.clone(),
+                        replay_hash: replay_hash.clone(),
+                        replay_summary: replay_summary.clone(),
+                    },
+                );
+                let signed_tx = if allow_unsigned {
+                    tx_resolve
+                } else {
+                    get_wallets(&config)
+                        .sign_transaction(&signer, tx_resolve.nonce, tx_resolve.kind.clone())
+                        .map_err(|e| Error::SignatureVerification(e.to_string()))?
+                };
+                if signed_tx.signature.is_some() {
+                    wallet::verify_signature(&signed_tx)?;
+                } else if !allow_unsigned && !minters.contains(&signer) {
+                    return Err(Error::SignatureVerification(
+                        "ResolveDispute requires signed tx or --allow-unsigned".to_string(),
+                    ));
+                }
+                let now = metering_chain::current_timestamp().max(0) as u64;
+                const DEFAULT_MAX_AGE: u64 = 300;
+                let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                live_ctx.next_tx_id = Some(next_tx_id);
+                state = replay::apply_with_replay_verifier(
+                    &storage,
+                    &state,
+                    &signed_tx,
+                    &live_ctx,
+                    Some(&minters),
+                )?;
+                next_tx_id += 1;
+                storage.append_tx(&signed_tx)?;
+                storage.persist_state(&state, next_tx_id)?;
+                let s = state.get_settlement(&sid).unwrap();
+                let d = state
+                    .get_dispute(&metering_chain::state::DisputeId::new(&sid))
+                    .unwrap();
+                println!(
+                    "Dispute resolved: {:?}. Settlement {} status: {:?}",
+                    d.status,
+                    sid.key(),
+                    s.status
+                );
+                Ok(())
+            }
+            SettlementSub::List {
+                owner,
+                service_id,
+                status,
+            } => {
+                let (state, _) = load_or_create_state(&storage, &config)?;
+                let mut items: Vec<SettlementListOutput> = state
+                    .settlements
+                    .values()
+                    .filter(|s| {
+                        owner.as_ref().is_none_or(|o| s.id.owner == *o)
+                            && service_id
+                                .as_ref()
+                                .is_none_or(|sid| s.id.service_id == *sid)
+                            && status.as_ref().is_none_or(|st| {
+                                format!("{:?}", s.status)
+                                    .to_lowercase()
+                                    .contains(&st.to_lowercase())
+                            })
+                    })
+                    .map(|s| SettlementListOutput {
+                        settlement_id: s.id.key(),
+                        owner: s.id.owner.clone(),
+                        service_id: s.id.service_id.clone(),
+                        window_id: s.id.window_id.clone(),
+                        status: format!("{:?}", s.status),
+                        gross_spent: s.gross_spent,
+                        operator_share: s.operator_share,
+                        payable: s.payable(),
+                    })
+                    .collect();
+                items.sort_by(|a, b| a.settlement_id.cmp(&b.settlement_id));
+                let output = SettlementListOutputWrap { settlements: items };
+                println!("{}", format_output(&output, &cli.format)?);
+                Ok(())
+            }
+            SettlementSub::Show {
+                owner,
+                service_id,
+                window_id,
+            } => {
+                let (state, _) = load_or_create_state(&storage, &config)?;
+                let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
+                let s = state
+                    .get_settlement(&sid)
+                    .ok_or(Error::SettlementNotFound)?;
+                let (replay_hash, replay_summary) = state
+                    .get_dispute_resolution_audit(&sid)
+                    .map(|a| (Some(a.replay_hash.clone()), Some(a.replay_summary.clone())))
+                    .unwrap_or((None, None));
+                let output = SettlementShowOutput {
+                    settlement_id: sid.key(),
+                    owner: s.id.owner.clone(),
+                    service_id: s.id.service_id.clone(),
+                    window_id: s.id.window_id.clone(),
+                    status: format!("{:?}", s.status),
+                    gross_spent: s.gross_spent,
+                    operator_share: s.operator_share,
+                    protocol_fee: s.protocol_fee,
+                    reserve_locked: s.reserve_locked,
+                    payable: s.payable(),
+                    total_paid: s.total_paid,
+                    evidence_hash: s.evidence_hash.clone(),
+                    from_tx_id: s.from_tx_id,
+                    to_tx_id: s.to_tx_id,
+                    replay_hash,
+                    replay_summary,
+                    claims: state
+                        .claims
+                        .values()
+                        .filter(|c| c.id.settlement_key == sid.key())
+                        .map(|c| ClaimSummaryOutput {
+                            operator: c.id.operator.clone(),
+                            claim_amount: c.claim_amount,
+                            status: format!("{:?}", c.status),
+                        })
+                        .collect(),
+                };
+                println!("{}", format_output(&output, &cli.format)?);
+                Ok(())
+            }
+            SettlementSub::DisputeShow {
+                owner,
+                service_id,
+                window_id,
+            } => {
+                let (state, _) = load_or_create_state(&storage, &config)?;
+                let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
+                let _ = state
+                    .get_settlement(&sid)
+                    .ok_or(Error::SettlementNotFound)?;
+                let did = metering_chain::state::DisputeId::new(&sid);
+                let d = state.get_dispute(&did).ok_or(Error::DisputeNotFound)?;
+                let output = DisputeShowOutput {
+                    settlement_key: sid.key(),
+                    status: format!("{:?}", d.status),
+                    resolution_audit: d.resolution_audit.as_ref().map(|a| ResolutionAuditOutput {
+                        replay_hash: a.replay_hash.clone(),
+                        replay_summary: a.replay_summary.clone(),
+                    }),
+                };
+                println!("{}", format_output(&output, &cli.format)?);
+                Ok(())
+            }
+            SettlementSub::EvidenceShow {
+                owner,
+                service_id,
+                window_id,
+            } => {
+                let (state, _) = load_or_create_state(&storage, &config)?;
+                let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
+                let bundle = state
+                    .get_evidence_bundle(&sid)
+                    .ok_or(Error::EvidenceNotFound)?;
+                let output = EvidenceShowOutput {
+                    settlement_key: bundle.settlement_key.clone(),
+                    from_tx_id: bundle.from_tx_id,
+                    to_tx_id: bundle.to_tx_id,
+                    evidence_hash: bundle.evidence_hash.clone(),
+                    replay_hash: bundle.replay_hash.clone(),
+                    replay_summary: bundle.replay_summary.clone(),
+                };
+                println!("{}", format_output(&output, &cli.format)?);
+                Ok(())
+            }
+        },
+
+        Commands::Policy { sub } => {
+            let minters = get_authorized_minters(&config);
+            match sub {
+                PolicySub::Publish {
+                    scope,
+                    version,
+                    effective_from_tx_id,
+                    operator_share_bps,
+                    protocol_fee_bps,
+                    dispute_window_secs,
+                    reserve_fixed,
+                    signer,
+                    allow_unsigned,
+                } => {
+                    let (mut state, mut next_tx_id) = load_or_create_state(&storage, &config)?;
+                    let policy_scope = parse_policy_scope(&scope)?;
+                    let fee_policy = metering_chain::state::FeePolicy {
+                        operator_share_bps,
+                        protocol_fee_bps,
+                    };
+                    if !fee_policy.validate() {
+                        return Err(Error::InvalidPolicyParameters);
+                    }
+                    let reserve_policy = if reserve_fixed == 0 {
+                        metering_chain::state::ReservePolicy::None
+                    } else {
+                        metering_chain::state::ReservePolicy::Fixed {
+                            amount: reserve_fixed,
+                        }
+                    };
+                    let policy_config = metering_chain::state::PolicyConfig {
+                        fee_policy,
+                        reserve_policy,
+                        dispute_policy: metering_chain::state::DisputePolicy {
+                            dispute_window_secs,
+                        },
+                    };
+                    if !policy_config.validate() {
+                        return Err(Error::InvalidPolicyParameters);
+                    }
+                    let signer_nonce = state.get_account(&signer).map(|a| a.nonce()).unwrap_or(0);
+                    let tx = SignedTx::new(
+                        signer.clone(),
+                        signer_nonce,
+                        Transaction::PublishPolicyVersion {
+                            scope: policy_scope,
+                            version,
+                            effective_from_tx_id,
+                            config: policy_config.clone(),
+                        },
+                    );
+                    let signed_tx = if allow_unsigned {
+                        tx
+                    } else {
+                        get_wallets(&config)
+                            .sign_transaction(&signer, tx.nonce, tx.kind.clone())
+                            .map_err(|e| Error::SignatureVerification(e.to_string()))?
+                    };
+                    if signed_tx.signature.is_some() {
+                        wallet::verify_signature(&signed_tx)?;
+                    } else if !allow_unsigned && !minters.contains(&signer) {
+                        return Err(Error::SignatureVerification(
+                            "PublishPolicyVersion requires signed tx or --allow-unsigned"
+                                .to_string(),
+                        ));
+                    }
+                    let now = metering_chain::current_timestamp().max(0) as u64;
+                    const DEFAULT_MAX_AGE: u64 = 300;
+                    let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
+                    live_ctx.next_tx_id = Some(next_tx_id);
+                    state = replay::apply_with_replay_verifier(
+                        &storage,
+                        &state,
+                        &signed_tx,
+                        &live_ctx,
+                        Some(&minters),
+                    )?;
+                    next_tx_id += 1;
+                    storage.append_tx(&signed_tx)?;
+                    storage.persist_state(&state, next_tx_id)?;
+                    println!(
+                        "Policy published: {} version {}",
+                        policy_config.fee_policy.operator_share_bps, version
+                    );
+                    Ok(())
+                }
+                PolicySub::List { scope } => {
+                    let (state, _) = load_or_create_state(&storage, &config)?;
+                    let items: Vec<_> = state
+                        .policy_versions
+                        .values()
+                        .filter(|pv| scope.as_ref().is_none_or(|s| pv.id.scope_key == *s))
+                        .map(|pv| {
+                            (
+                                pv.id.scope_key.clone(),
+                                pv.id.version,
+                                format!("{:?}", pv.status),
+                            )
+                        })
+                        .collect();
+                    for (sk, ver, st) in items {
+                        println!("{}:{}  {}", sk, ver, st);
+                    }
+                    Ok(())
+                }
+                PolicySub::Show { scope_key, version } => {
+                    let (state, _) = load_or_create_state(&storage, &config)?;
+                    let id = metering_chain::state::PolicyVersionId {
+                        scope_key: scope_key.clone(),
+                        version,
+                    };
+                    let pv = state.get_policy_version(&id).ok_or(Error::PolicyNotFound)?;
+                    println!(
+                        "scope_key={} version={} effective_from_tx_id={} status={:?} operator_share_bps={} protocol_fee_bps={} dispute_window_secs={}",
+                        pv.id.scope_key,
+                        pv.id.version,
+                        pv.effective_from_tx_id,
+                        pv.status,
+                        pv.config.fee_policy.operator_share_bps,
+                        pv.config.fee_policy.protocol_fee_bps,
+                        pv.config.dispute_policy.dispute_window_secs
+                    );
+                    Ok(())
+                }
+            }
+        }
+
         Commands::Report { address } => {
             let (state, _) = load_or_create_state(&storage, &config)?;
 
@@ -596,4 +1522,105 @@ struct ReportOutput {
 #[derive(Debug, serde::Serialize)]
 struct ReportListOutput {
     reports: Vec<ReportOutput>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct SettlementProposeOutput {
+    settlement_id: String,
+    status: String,
+    gross_spent: u64,
+    operator_share: u64,
+    protocol_fee: u64,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct SettlementFinalizeOutput {
+    settlement_id: String,
+    status: String,
+    payable: u64,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ClaimSubmitOutput {
+    claim_id: String,
+    status: String,
+    claim_amount: u64,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ClaimPayOutput {
+    claim_id: String,
+    status: &'static str,
+    amount_paid: u64,
+    operator_balance_delta: u64,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct SettlementListOutput {
+    settlement_id: String,
+    owner: String,
+    service_id: String,
+    window_id: String,
+    status: String,
+    gross_spent: u64,
+    operator_share: u64,
+    payable: u64,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct SettlementListOutputWrap {
+    settlements: Vec<SettlementListOutput>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ClaimSummaryOutput {
+    operator: String,
+    claim_amount: u64,
+    status: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct SettlementShowOutput {
+    settlement_id: String,
+    owner: String,
+    service_id: String,
+    window_id: String,
+    status: String,
+    gross_spent: u64,
+    operator_share: u64,
+    protocol_fee: u64,
+    reserve_locked: u64,
+    payable: u64,
+    total_paid: u64,
+    evidence_hash: String,
+    from_tx_id: u64,
+    to_tx_id: u64,
+    /// G4: set when dispute was resolved (resolution_audit)
+    replay_hash: Option<String>,
+    /// G4: set when dispute was resolved
+    replay_summary: Option<metering_chain::evidence::ReplaySummary>,
+    claims: Vec<ClaimSummaryOutput>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ResolutionAuditOutput {
+    replay_hash: String,
+    replay_summary: metering_chain::evidence::ReplaySummary,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct DisputeShowOutput {
+    settlement_key: String,
+    status: String,
+    resolution_audit: Option<ResolutionAuditOutput>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct EvidenceShowOutput {
+    settlement_key: String,
+    from_tx_id: u64,
+    to_tx_id: u64,
+    evidence_hash: String,
+    replay_hash: String,
+    replay_summary: metering_chain::evidence::ReplaySummary,
 }

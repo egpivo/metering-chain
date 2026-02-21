@@ -1,8 +1,12 @@
 use crate::error::{Error, Result};
 use crate::state::hook::Hook;
+use crate::state::policy::{PolicyVersion, PolicyVersionId, PolicyVersionStatus};
+use crate::state::settlement::{
+    Claim, ClaimId, Dispute, DisputeId, DisputeStatus, Settlement, SettlementId,
+};
 use crate::state::{MeterKey, State};
 use crate::tx::validation::{capability_id, validate, ValidationContext};
-use crate::tx::{SignedTx, Transaction};
+use crate::tx::{DisputeVerdict, SignedTx, Transaction};
 use std::collections::HashSet;
 
 /// State machine with injectable hook for metering/settlement interception.
@@ -104,6 +108,137 @@ impl<M: Hook> StateMachine<M> {
                 capability_id,
             } => {
                 apply_revoke_delegation(&mut new_state, capability_id, &tx.signer)?;
+            }
+            Transaction::ProposeSettlement {
+                owner,
+                service_id,
+                window_id,
+                from_tx_id,
+                to_tx_id,
+                gross_spent,
+                operator_share,
+                protocol_fee,
+                reserve_locked,
+                evidence_hash,
+            } => {
+                apply_propose_settlement(
+                    &mut new_state,
+                    owner,
+                    service_id,
+                    window_id,
+                    *from_tx_id,
+                    *to_tx_id,
+                    *gross_spent,
+                    *operator_share,
+                    *protocol_fee,
+                    *reserve_locked,
+                    evidence_hash,
+                    &tx.signer,
+                    ctx.next_tx_id,
+                )?;
+            }
+            Transaction::FinalizeSettlement {
+                owner,
+                service_id,
+                window_id,
+            } => {
+                apply_finalize_settlement(
+                    &mut new_state,
+                    owner,
+                    service_id,
+                    window_id,
+                    &tx.signer,
+                    ctx.now,
+                )?;
+            }
+            Transaction::SubmitClaim {
+                operator,
+                owner,
+                service_id,
+                window_id,
+                claim_amount,
+            } => {
+                apply_submit_claim(
+                    &mut new_state,
+                    operator,
+                    owner,
+                    service_id,
+                    window_id,
+                    *claim_amount,
+                    &tx.signer,
+                )?;
+            }
+            Transaction::PayClaim {
+                operator,
+                owner,
+                service_id,
+                window_id,
+            } => {
+                apply_pay_claim(
+                    &mut new_state,
+                    operator,
+                    owner,
+                    service_id,
+                    window_id,
+                    &tx.signer,
+                )?;
+            }
+            Transaction::OpenDispute {
+                owner,
+                service_id,
+                window_id,
+                reason_code,
+                evidence_hash,
+            } => {
+                apply_open_dispute(
+                    &mut new_state,
+                    owner,
+                    service_id,
+                    window_id,
+                    reason_code,
+                    evidence_hash,
+                    &tx.signer,
+                )?;
+            }
+            Transaction::ResolveDispute {
+                owner,
+                service_id,
+                window_id,
+                verdict,
+                evidence_hash: tx_evidence_hash,
+                replay_hash,
+                replay_summary,
+            } => {
+                apply_resolve_dispute(
+                    &mut new_state,
+                    owner,
+                    service_id,
+                    window_id,
+                    *verdict,
+                    tx_evidence_hash,
+                    replay_hash,
+                    replay_summary,
+                    &tx.signer,
+                )?;
+            }
+            Transaction::PublishPolicyVersion {
+                scope,
+                version,
+                effective_from_tx_id,
+                config,
+            } => {
+                apply_publish_policy_version(
+                    &mut new_state,
+                    scope.clone(),
+                    *version,
+                    *effective_from_tx_id,
+                    config.clone(),
+                    &tx.signer,
+                    ctx.now.unwrap_or(0),
+                )?;
+            }
+            Transaction::SupersedePolicyVersion { scope_key, version } => {
+                apply_supersede_policy_version(&mut new_state, scope_key, *version, &tx.signer)?;
             }
         }
 
@@ -215,6 +350,295 @@ fn apply_revoke_delegation(state: &mut State, capability_id: &str, signer: &str)
     let signer_account = state
         .get_account_mut(signer)
         .ok_or_else(|| Error::StateError(format!("Account {} not found", signer)))?;
+    signer_account.increment_nonce();
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_propose_settlement(
+    state: &mut State,
+    owner: &str,
+    service_id: &str,
+    window_id: &str,
+    from_tx_id: u64,
+    to_tx_id: u64,
+    gross_spent: u64,
+    operator_share: u64,
+    protocol_fee: u64,
+    reserve_locked: u64,
+    evidence_hash: &str,
+    signer: &str,
+    next_tx_id: Option<u64>,
+) -> Result<()> {
+    let id = SettlementId::new(
+        owner.to_string(),
+        service_id.to_string(),
+        window_id.to_string(),
+    );
+    let (op_share, proto_fee, res_locked) = if let Some(current_tx_id) = next_tx_id {
+        if let Some(policy) = state.resolve_policy(owner, service_id, current_tx_id) {
+            let (op, proto) = policy.config.fee_policy.split(gross_spent);
+            let res = policy.config.reserve_from_gross(gross_spent);
+            if op != operator_share || proto != protocol_fee || res != reserve_locked {
+                return Err(Error::SettlementConservationViolation);
+            }
+            (operator_share, protocol_fee, reserve_locked)
+        } else {
+            (operator_share, protocol_fee, reserve_locked)
+        }
+    } else {
+        (operator_share, protocol_fee, reserve_locked)
+    };
+    let mut settlement = Settlement::proposed(
+        id.clone(),
+        gross_spent,
+        op_share,
+        proto_fee,
+        res_locked,
+        evidence_hash.to_string(),
+        from_tx_id,
+        to_tx_id,
+    );
+    if let Some(current_tx_id) = next_tx_id {
+        if let Some(policy) = state.resolve_policy(owner, service_id, current_tx_id) {
+            settlement.set_bound_policy(
+                policy.id.scope_key.clone(),
+                policy.id.version,
+                policy.config.dispute_policy.dispute_window_secs,
+            );
+        }
+    }
+    state.insert_settlement(settlement);
+    let signer_account = state.get_or_create_account(signer);
+    signer_account.increment_nonce();
+    Ok(())
+}
+
+fn apply_finalize_settlement(
+    state: &mut State,
+    owner: &str,
+    service_id: &str,
+    window_id: &str,
+    signer: &str,
+    now: Option<u64>,
+) -> Result<()> {
+    let id = SettlementId::new(
+        owner.to_string(),
+        service_id.to_string(),
+        window_id.to_string(),
+    );
+    let s = state
+        .get_settlement_mut(&id)
+        .ok_or(Error::SettlementNotFound)?;
+    s.finalize();
+    if let Some(t) = now {
+        s.set_finalized_at(t);
+    }
+    let signer_account = state.get_or_create_account(signer);
+    signer_account.increment_nonce();
+    Ok(())
+}
+
+fn apply_submit_claim(
+    state: &mut State,
+    operator: &str,
+    owner: &str,
+    service_id: &str,
+    window_id: &str,
+    claim_amount: u64,
+    signer: &str,
+) -> Result<()> {
+    let sid = SettlementId::new(
+        owner.to_string(),
+        service_id.to_string(),
+        window_id.to_string(),
+    );
+    let cid = ClaimId::new(operator.to_string(), &sid);
+    let claim = Claim::pending(cid, claim_amount);
+    state.insert_claim(claim);
+    let signer_account = state.get_or_create_account(signer);
+    signer_account.increment_nonce();
+    Ok(())
+}
+
+fn apply_pay_claim(
+    state: &mut State,
+    operator: &str,
+    owner: &str,
+    service_id: &str,
+    window_id: &str,
+    signer: &str,
+) -> Result<()> {
+    let sid = SettlementId::new(
+        owner.to_string(),
+        service_id.to_string(),
+        window_id.to_string(),
+    );
+    let cid = ClaimId::new(operator.to_string(), &sid);
+    let payable = state
+        .get_settlement(&sid)
+        .ok_or(Error::SettlementNotFound)?
+        .payable();
+    let claim = state.get_claim_mut(&cid).ok_or(Error::ClaimNotPending)?;
+    let amount = claim.claim_amount.min(payable);
+    claim.pay();
+
+    let s = state
+        .get_settlement_mut(&sid)
+        .ok_or(Error::SettlementNotFound)?;
+    s.add_paid(amount);
+
+    // Pay operator: mint to operator (4A MVP; protocol/admin is signer/minter)
+    let operator_account = state.get_or_create_account(operator);
+    operator_account.add_balance(amount);
+
+    let signer_account = state.get_or_create_account(signer);
+    signer_account.increment_nonce();
+    Ok(())
+}
+
+fn apply_open_dispute(
+    state: &mut State,
+    owner: &str,
+    service_id: &str,
+    window_id: &str,
+    reason_code: &str,
+    evidence_hash: &str,
+    signer: &str,
+) -> Result<()> {
+    let sid = SettlementId::new(
+        owner.to_string(),
+        service_id.to_string(),
+        window_id.to_string(),
+    );
+    let dispute = Dispute::open(
+        sid.clone(),
+        reason_code.to_string(),
+        evidence_hash.to_string(),
+        0, // opened_at: 0 for replay/MVP; can use ctx.now in future
+    );
+    state.insert_dispute(dispute);
+    let s = state
+        .get_settlement_mut(&sid)
+        .ok_or(Error::SettlementNotFound)?;
+    s.mark_disputed();
+    let signer_account = state.get_or_create_account(signer);
+    signer_account.increment_nonce();
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_resolve_dispute(
+    state: &mut State,
+    owner: &str,
+    service_id: &str,
+    window_id: &str,
+    verdict: DisputeVerdict,
+    evidence_hash: &str,
+    replay_hash: &str,
+    replay_summary: &crate::evidence::ReplaySummary,
+    signer: &str,
+) -> Result<()> {
+    let sid = SettlementId::new(
+        owner.to_string(),
+        service_id.to_string(),
+        window_id.to_string(),
+    );
+    let s = state
+        .get_settlement(&sid)
+        .ok_or(Error::SettlementNotFound)?;
+    // G4: bind proof to settlement window (defense in depth).
+    if s.evidence_hash != evidence_hash {
+        return Err(Error::ReplayMismatch);
+    }
+    if replay_summary.from_tx_id != s.from_tx_id || replay_summary.to_tx_id != s.to_tx_id {
+        return Err(Error::ReplayMismatch);
+    }
+    let bundle = crate::evidence::EvidenceBundle {
+        settlement_key: sid.key(),
+        from_tx_id: s.from_tx_id,
+        to_tx_id: s.to_tx_id,
+        evidence_hash: s.evidence_hash.clone(),
+        replay_hash: replay_hash.to_string(),
+        replay_summary: replay_summary.clone(),
+    };
+    bundle.validate_shape()?;
+    if replay_summary.replay_hash() != replay_hash {
+        return Err(Error::ReplayMismatch);
+    }
+    if s.gross_spent != replay_summary.gross_spent
+        || s.operator_share != replay_summary.operator_share
+        || s.protocol_fee != replay_summary.protocol_fee
+        || s.reserve_locked != replay_summary.reserve_locked
+    {
+        return Err(Error::ReplayMismatch);
+    }
+    let did = DisputeId::new(&sid);
+    let dispute = state.get_dispute_mut(&did).ok_or(Error::DisputeNotFound)?;
+    let status = match verdict {
+        DisputeVerdict::Upheld => DisputeStatus::Upheld,
+        DisputeVerdict::Dismissed => DisputeStatus::Dismissed,
+    };
+    dispute.resolve(status);
+    dispute.set_resolution_audit(crate::state::ResolutionAudit {
+        replay_hash: replay_hash.to_string(),
+        replay_summary: replay_summary.clone(),
+    });
+    if verdict == DisputeVerdict::Dismissed {
+        let s = state
+            .get_settlement_mut(&sid)
+            .ok_or(Error::SettlementNotFound)?;
+        s.reopen_after_dismissed();
+    }
+    let signer_account = state.get_or_create_account(signer);
+    signer_account.increment_nonce();
+    Ok(())
+}
+
+fn apply_publish_policy_version(
+    state: &mut State,
+    scope: crate::state::PolicyScope,
+    version: u64,
+    effective_from_tx_id: u64,
+    config: crate::state::PolicyConfig,
+    signer: &str,
+    published_at: u64,
+) -> Result<()> {
+    let scope_key = scope.scope_key();
+    let id = PolicyVersionId {
+        scope_key: scope_key.clone(),
+        version,
+    };
+    let pv = PolicyVersion {
+        id: id.clone(),
+        scope,
+        effective_from_tx_id,
+        published_by: signer.to_string(),
+        published_at,
+        config,
+        status: PolicyVersionStatus::Published,
+    };
+    state.insert_policy_version(pv);
+    let signer_account = state.get_or_create_account(signer);
+    signer_account.increment_nonce();
+    Ok(())
+}
+
+fn apply_supersede_policy_version(
+    state: &mut State,
+    scope_key: &str,
+    version: u64,
+    signer: &str,
+) -> Result<()> {
+    let id = PolicyVersionId {
+        scope_key: scope_key.to_string(),
+        version,
+    };
+    let pv = state
+        .get_policy_version_mut(&id)
+        .ok_or(Error::PolicyNotFound)?;
+    pv.status = PolicyVersionStatus::Superseded;
+    let signer_account = state.get_or_create_account(signer);
     signer_account.increment_nonce();
     Ok(())
 }

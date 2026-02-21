@@ -25,6 +25,24 @@ impl Error {
             CapabilityLimitExceeded => "CAPABILITY_LIMIT_EXCEEDED",
             DelegationRevoked => "DELEGATION_REVOKED",
             DelegationScopeMismatch => "DELEGATION_SCOPE_MISMATCH",
+            DuplicateSettlementWindow => "DUPLICATE_SETTLEMENT_WINDOW",
+            SettlementNotFound => "SETTLEMENT_NOT_FOUND",
+            SettlementNotProposed => "SETTLEMENT_NOT_PROPOSED",
+            SettlementNotFinalized => "SETTLEMENT_NOT_FINALIZED",
+            ClaimAmountExceedsPayable => "CLAIM_AMOUNT_EXCEEDS_PAYABLE",
+            ClaimNotPending => "CLAIM_NOT_PENDING",
+            SettlementConservationViolation => "SETTLEMENT_CONSERVATION_VIOLATION",
+            DisputeAlreadyOpen => "DISPUTE_ALREADY_OPEN",
+            DisputeNotFound => "DISPUTE_NOT_FOUND",
+            DisputeNotOpen => "DISPUTE_NOT_OPEN",
+            InvalidPolicyParameters => "INVALID_POLICY_PARAMETERS",
+            PolicyVersionConflict => "POLICY_VERSION_CONFLICT",
+            PolicyNotFound => "POLICY_NOT_FOUND",
+            PolicyNotEffective => "POLICY_NOT_EFFECTIVE",
+            RetroactivePolicyForbidden => "RETROACTIVE_POLICY_FORBIDDEN",
+            InvalidEvidenceBundle => "INVALID_EVIDENCE_BUNDLE",
+            ReplayMismatch => "REPLAY_MISMATCH",
+            EvidenceNotFound => "EVIDENCE_NOT_FOUND",
         }
     }
 }
@@ -88,6 +106,50 @@ pub enum Error {
 
     #[error("Delegation scope mismatch: proof service_id or ability does not match transaction")]
     DelegationScopeMismatch,
+
+    // Phase 4A: Settlement
+    #[error("Duplicate settlement window: same (owner, service_id, window_id) already exists")]
+    DuplicateSettlementWindow,
+    #[error("Settlement not found")]
+    SettlementNotFound,
+    #[error("Settlement not proposed or already finalized")]
+    SettlementNotProposed,
+    #[error("Settlement not finalized")]
+    SettlementNotFinalized,
+    #[error("Claim amount exceeds payable")]
+    ClaimAmountExceedsPayable,
+    #[error("Claim not found or not pending")]
+    ClaimNotPending,
+    #[error("Invalid settlement: gross_spent != operator_share + protocol_fee + reserve")]
+    SettlementConservationViolation,
+
+    // Phase 4B: Dispute
+    #[error("Dispute already open for this settlement")]
+    DisputeAlreadyOpen,
+    #[error("Dispute not found")]
+    DisputeNotFound,
+    #[error("Dispute not open (already resolved)")]
+    DisputeNotOpen,
+
+    // Phase 4C (G3): Policy
+    #[error("Invalid policy parameters (e.g. bps sum != 10000 or dispute_window_secs == 0)")]
+    InvalidPolicyParameters,
+    #[error("Policy version conflict (duplicate scope:version)")]
+    PolicyVersionConflict,
+    #[error("Policy not found")]
+    PolicyNotFound,
+    #[error("Policy not effective at this tx_id")]
+    PolicyNotEffective,
+    #[error("Retroactive policy forbidden (effective_from_tx_id < next_tx_id)")]
+    RetroactivePolicyForbidden,
+
+    // Phase 4 G4: Evidence / replay
+    #[error("Invalid evidence bundle (shape or required fields)")]
+    InvalidEvidenceBundle,
+    #[error("Replay result does not match settlement totals or replay_hash")]
+    ReplayMismatch,
+    #[error("Evidence or bundle not found")]
+    EvidenceNotFound,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

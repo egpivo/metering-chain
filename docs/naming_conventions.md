@@ -1,16 +1,24 @@
 # Naming Conventions
 
-For consistency with Phase 4 Settlement/Dispute context.
+For consistency with Phase 4 Settlement/Dispute/Policy context.
 
 ## Commands (Transactions)
 
 - **Pattern**: VerbNoun or Verb (e.g. `OpenMeter`, `CloseMeter`, `Mint`, `Consume`)
-- Phase 4: `ProposeSettlement`, `FinalizeSettlement`, `SubmitClaim`, `PayClaim`, `OpenDispute`, `ResolveDispute`
+- Phase 4 Settlement/Dispute: `ProposeSettlement`, `FinalizeSettlement`, `SubmitClaim`, `PayClaim`, `OpenDispute`, `ResolveDispute`
+- Phase 4 Policy (G3): `PublishPolicyVersion`, `SupersedePolicyVersion`
 
 ## Events (Phase 4)
 
 - **Pattern**: NounPastParticiple (e.g. `SettlementProposed`, `SettlementFinalized`)
-- Phase 4: `SettlementProposed`, `SettlementFinalized`, `ClaimSubmitted`, `ClaimPaid`, `DisputeOpened`, `DisputeResolved`
+- Settlement/Dispute: `SettlementProposed`, `SettlementFinalized`, `ClaimSubmitted`, `ClaimPaid`, `DisputeOpened`, `DisputeResolved`
+- Policy: `PolicyVersionPublished`, `PolicyVersionSuperseded`
+
+## Policy domain (G3)
+
+- **Scopes**: `PolicyScope::Global`, `PolicyScope::Owner`, `PolicyScope::OwnerService`
+- **Scope keys** (storage/audit): `global`, `owner:{owner}`, `owner_service:{owner}:{service_id}`
+- **Tx names**: `PublishPolicyVersion`, `SupersedePolicyVersion` (no "PolicyVersionPublish" etc.)
 
 ## State Labels (UI)
 

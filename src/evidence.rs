@@ -1,20 +1,18 @@
-//! Evidence and replay interfaces for Phase 4 Settlement/Dispute.
+//! Evidence and replay interfaces for Phase 4 Settlement/Dispute (G4).
 //!
-//! Extension points for:
-//! - Hashing tx slices and evidence bundles
-//! - Loading tx slices from storage (Phase 4)
-//! - Replay summary for dispute resolution (Phase 4)
-//!
-//! See `.local/phase4_spec.md` for the Phase 4 EvidenceBundle schema.
+//! See `.local/phase4_spec.md` and `.local/phase4_g4_tasks.md` for EvidenceBundle schema.
 
-use crate::{sha256_digest, tx::SignedTx};
+use crate::error::{Error, Result};
+use crate::sha256_digest;
+use crate::tx::SignedTx;
+use serde::{Deserialize, Serialize};
 
 /// SHA256 hash of data, lowercase hex. Used for evidence hashing and capability IDs.
 pub fn evidence_hash(data: &[u8]) -> String {
     hex::encode(sha256_digest(data)).to_lowercase()
 }
 
-/// Hash of a tx slice for evidence bundle. Phase 4 will define the canonical serialization.
+/// Hash of a tx slice for evidence bundle (canonical bincode serialization).
 pub fn tx_slice_hash(txs: &[SignedTx]) -> String {
     let bytes: Vec<u8> = txs
         .iter()
@@ -23,20 +21,93 @@ pub fn tx_slice_hash(txs: &[SignedTx]) -> String {
     evidence_hash(&bytes)
 }
 
-/// Placeholder for Phase 4: replay summary (tx count, totals, state hash).
-/// Settlement and Dispute contexts will use this for deterministic evidence verification.
-#[derive(Debug, Clone)]
+/// Replay summary for a settlement window: deterministic totals from replay (G4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplaySummary {
-    pub tx_count: u64,
     pub from_tx_id: u64,
+    pub to_tx_id: u64,
+    pub tx_count: u64,
+    pub gross_spent: u64,
+    pub operator_share: u64,
+    pub protocol_fee: u64,
+    pub reserve_locked: u64,
 }
 
 impl ReplaySummary {
-    pub fn new(from_tx_id: u64, tx_count: u64) -> Self {
+    pub fn new(
+        from_tx_id: u64,
+        to_tx_id: u64,
+        tx_count: u64,
+        gross_spent: u64,
+        operator_share: u64,
+        protocol_fee: u64,
+        reserve_locked: u64,
+    ) -> Self {
         ReplaySummary {
-            tx_count,
             from_tx_id,
+            to_tx_id,
+            tx_count,
+            gross_spent,
+            operator_share,
+            protocol_fee,
+            reserve_locked,
         }
+    }
+
+    /// Canonical bytes for deterministic replay_hash.
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        bincode::serialize(self).unwrap_or_default()
+    }
+
+    /// Deterministic hash of this summary (G4 replay proof).
+    pub fn replay_hash(&self) -> String {
+        evidence_hash(&self.canonical_bytes())
+    }
+}
+
+/// Evidence bundle for a settlement window (G4): reference data for replay-justified resolve.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EvidenceBundle {
+    pub settlement_key: String,
+    pub from_tx_id: u64,
+    pub to_tx_id: u64,
+    pub evidence_hash: String,
+    pub replay_hash: String,
+    pub replay_summary: ReplaySummary,
+}
+
+impl EvidenceBundle {
+    /// Canonical bytes for bundle hash.
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        bincode::serialize(self).unwrap_or_default()
+    }
+
+    /// Deterministic bundle hash.
+    pub fn bundle_hash(&self) -> String {
+        evidence_hash(&self.canonical_bytes())
+    }
+
+    /// Validate shape and sanity (required fields, from_tx_id < to_tx_id, tx_count consistent).
+    pub fn validate_shape(&self) -> Result<()> {
+        if self.settlement_key.is_empty() {
+            return Err(Error::InvalidEvidenceBundle);
+        }
+        if self.from_tx_id >= self.to_tx_id {
+            return Err(Error::InvalidEvidenceBundle);
+        }
+        if self.evidence_hash.is_empty() || self.replay_hash.is_empty() {
+            return Err(Error::InvalidEvidenceBundle);
+        }
+        let expected_count = self.to_tx_id.saturating_sub(self.from_tx_id);
+        if self.replay_summary.tx_count != expected_count {
+            return Err(Error::InvalidEvidenceBundle);
+        }
+        if self.replay_summary.from_tx_id != self.from_tx_id
+            || self.replay_summary.to_tx_id != self.to_tx_id
+        {
+            return Err(Error::InvalidEvidenceBundle);
+        }
+        Ok(())
     }
 }
 
@@ -68,5 +139,31 @@ mod tests {
         let h1 = tx_slice_hash(&txs);
         let h2 = tx_slice_hash(&txs);
         assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn test_replay_summary_replay_hash_deterministic() {
+        let s = ReplaySummary::new(0, 3, 3, 50, 45, 5, 0);
+        assert_eq!(s.replay_hash(), s.replay_hash());
+    }
+
+    #[test]
+    fn test_evidence_bundle_validate_shape() {
+        let summary = ReplaySummary::new(0, 2, 2, 10, 9, 1, 0);
+        let bundle = EvidenceBundle {
+            settlement_key: "a:b:w".to_string(),
+            from_tx_id: 0,
+            to_tx_id: 2,
+            evidence_hash: "eh".to_string(),
+            replay_hash: summary.replay_hash(),
+            replay_summary: summary,
+        };
+        assert!(bundle.validate_shape().is_ok());
+        let bad = EvidenceBundle {
+            from_tx_id: 1,
+            to_tx_id: 1,
+            ..bundle.clone()
+        };
+        assert!(bad.validate_shape().is_err());
     }
 }

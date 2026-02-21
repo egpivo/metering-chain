@@ -38,6 +38,82 @@ pub enum Transaction {
         owner: String,
         capability_id: String,
     },
+    // --- Phase 4A: Settlement ---
+    /// Propose settlement for a window (operator/protocol-signed).
+    ProposeSettlement {
+        owner: String,
+        service_id: String,
+        window_id: String,
+        from_tx_id: u64,
+        to_tx_id: u64,
+        gross_spent: u64,
+        operator_share: u64,
+        protocol_fee: u64,
+        reserve_locked: u64,
+        evidence_hash: String,
+    },
+    /// Finalize settlement (challenge window elapsed; 4A: no window, immediate).
+    FinalizeSettlement {
+        owner: String,
+        service_id: String,
+        window_id: String,
+    },
+    /// Submit claim for operator payable (operator-signed).
+    SubmitClaim {
+        operator: String,
+        owner: String,
+        service_id: String,
+        window_id: String,
+        claim_amount: u64,
+    },
+    /// Pay a pending claim (protocol/admin-signed).
+    PayClaim {
+        operator: String,
+        owner: String,
+        service_id: String,
+        window_id: String,
+    },
+    // --- Phase 4B: Dispute ---
+    /// Open a dispute on a finalized settlement (freezes payouts).
+    OpenDispute {
+        owner: String,
+        service_id: String,
+        window_id: String,
+        reason_code: String,
+        evidence_hash: String,
+    },
+    /// Resolve an open dispute (verdict: Upheld or Dismissed). G4: replay_hash + replay_summary + evidence_hash required.
+    ResolveDispute {
+        owner: String,
+        service_id: String,
+        window_id: String,
+        verdict: DisputeVerdict,
+        /// G4: must equal settlement.evidence_hash (binds proof to settlement tx window).
+        evidence_hash: String,
+        /// G4: deterministic hash of replay summary (must match computed from replay_summary).
+        replay_hash: String,
+        /// G4: replay result for the settlement window (from_tx_id/to_tx_id must match settlement; totals must match).
+        replay_summary: crate::evidence::ReplaySummary,
+    },
+    // --- Phase 4C (G3): Policy ---
+    /// Publish a policy version (authority/minter-signed).
+    PublishPolicyVersion {
+        scope: crate::state::PolicyScope,
+        version: u64,
+        effective_from_tx_id: u64,
+        config: crate::state::PolicyConfig,
+    },
+    /// Supersede a published policy version.
+    SupersedePolicyVersion { scope_key: String, version: u64 },
+}
+
+/// Verdict for ResolveDispute (Phase 4B).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DisputeVerdict {
+    /// Challenger wins; settlement stays blocked.
+    Upheld,
+    /// Settlement upheld; payouts can resume.
+    Dismissed,
 }
 
 /// Payload V1: canonical signing (signer + nonce + kind). Used for legacy and owner-signed tx.
