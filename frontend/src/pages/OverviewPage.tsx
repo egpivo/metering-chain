@@ -20,7 +20,7 @@ export function OverviewPage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/demo_data/phase4_snapshot.json')
+    fetch(`${import.meta.env.BASE_URL ?? '/'}demo_data/phase4_snapshot.json`)
       .then((res) => {
         if (!res.ok) throw new Error(`Snapshot load failed: ${res.status}`);
         return res.json() as Promise<SnapshotPayload>;

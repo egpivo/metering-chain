@@ -11,7 +11,7 @@ import type {
   MeteringAnomalyItem,
 } from '../domain/types';
 
-const SNAPSHOT_URL = '/demo_data/phase4_snapshot.json';
+const SNAPSHOT_URL = `${import.meta.env.BASE_URL ?? '/'}demo_data/phase4_snapshot.json`;
 
 interface SnapshotWindowRaw {
   owner: string;
