@@ -57,8 +57,8 @@ impl FeePolicy {
 
     /// Compute operator_share and protocol_fee from gross_spent (integer division).
     pub fn split(&self, gross_spent: u64) -> (u64, u64) {
-        let op = (gross_spent as u64 * self.operator_share_bps as u64) / BPS_MAX as u64;
-        let proto = (gross_spent as u64 * self.protocol_fee_bps as u64) / BPS_MAX as u64;
+        let op = (gross_spent * self.operator_share_bps as u64) / BPS_MAX as u64;
+        let proto = (gross_spent * self.protocol_fee_bps as u64) / BPS_MAX as u64;
         (op, proto)
     }
 }
@@ -96,7 +96,7 @@ impl PolicyConfig {
             ReservePolicy::None => 0,
             ReservePolicy::Fixed { amount } => *amount,
             ReservePolicy::Bps { reserve_bps } => {
-                (gross_spent as u64 * *reserve_bps as u64) / BPS_MAX as u64
+                (gross_spent * *reserve_bps as u64) / BPS_MAX as u64
             }
         }
     }

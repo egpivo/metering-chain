@@ -28,7 +28,8 @@ Vitest; `npm run test:watch` for watch. Demo integration tests in `src/pages/Dem
 Snapshot mode (no API key). Set date range, sliders → **Recompute** → table updates. Select a window for Integrity & Evidence; **Resolve Dispute** only when Compare = MATCH and status = Disputed.
 
 - **Proxy (BYOK):** `npm run demo:server` (port 3001); Vite proxies `/api` there. `VITE_DEMO_BYOK_ENABLED=true` shows key input; key sent as `X-Dune-Api-Key` only.
-- **Real-data snapshot:** `frontend/server/refresh_demo_snapshot.sh` (uses `DUNE_API_KEY` from `.env`). Optional env: `DUNE_DAYS`, `DUNE_LIMIT`, `DEMO_SERVICE_ID`.
+- **Real-data snapshot:** `frontend/server/refresh_demo_snapshot.sh` (uses `DUNE_API_KEY` from `.env`). Optional env: `DUNE_DAYS`, `DUNE_LIMIT`, `START_DATE`, `END_DATE` (YYYY-MM-DD), `MAX_WINDOWS`, `DEMO_SERVICE_ID`.
+- **Extended demo without Dune:** `python frontend/server/generate_extended_demo_snapshot.py` → writes 2026-01-01–2026-02-10 synthetic snapshot (~1 MB, 1800+ windows) to `public/demo_data/phase4_snapshot.json`.
 
 ## Structure
 

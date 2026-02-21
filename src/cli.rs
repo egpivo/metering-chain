@@ -1399,7 +1399,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     let items: Vec<_> = state
                         .policy_versions
                         .values()
-                        .filter(|pv| scope.as_ref().map_or(true, |s| pv.id.scope_key == *s))
+                        .filter(|pv| scope.as_ref().is_none_or(|s| pv.id.scope_key == *s))
                         .map(|pv| {
                             (
                                 pv.id.scope_key.clone(),

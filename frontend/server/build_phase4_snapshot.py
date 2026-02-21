@@ -40,7 +40,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--amount-col", default="amount", help="Amount column in CSV")
     p.add_argument("--amount-scale", type=int, default=1, help="Multiply amount by this integer before flooring to units")
     p.add_argument("--min-window-units", type=int, default=1, help="Drop windows below this gross_spent")
-    p.add_argument("--max-windows", type=int, default=80, help="Cap windows in output for demo stability")
+    p.add_argument("--max-windows", type=int, default=2000, help="Cap windows in output (default 2000 for extended demo)")
     return p.parse_args()
 
 

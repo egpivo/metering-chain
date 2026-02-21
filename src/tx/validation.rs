@@ -1041,7 +1041,7 @@ fn validate_publish_policy_version(
         return Err(Error::PolicyVersionConflict);
     }
     let latest = state.latest_policy_version_for_scope(&scope_key);
-    if latest.map_or(false, |v| *version <= v) {
+    if latest.is_some_and(|v| *version <= v) {
         return Err(Error::PolicyVersionConflict);
     }
     if let Some(next) = ctx.next_tx_id {

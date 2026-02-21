@@ -93,6 +93,7 @@ pub fn replay_tx_slice(state: &State, txs: &[SignedTx], start_tx_id: u64) -> Res
 /// settlement's window and that evidence_hash in the tx matches the settlement.
 ///
 /// Returns (ReplaySummary, evidence_hash of the tx slice) for the window [from_tx_id, to_tx_id).
+#[allow(clippy::too_many_arguments)]
 pub fn replay_slice_to_summary<S: Storage>(
     storage: &S,
     from_tx_id: u64,

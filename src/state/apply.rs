@@ -527,6 +527,7 @@ fn apply_open_dispute(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_resolve_dispute(
     state: &mut State,
     owner: &str,
