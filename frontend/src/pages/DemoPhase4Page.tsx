@@ -17,6 +17,8 @@ import type {
   EvidenceBundleView,
 } from '../domain/types';
 
+const WINDOWS_PAGE_SIZE = 25;
+
 const defaultControls: DemoUiState['controls'] = {
   start_date: '2026-02-01',
   end_date: '2026-02-22',
@@ -64,6 +66,7 @@ export function DemoPhase4Page() {
   const [byokKey, setByokKey] = useState('');
   const [windows, setWindows] = useState<DemoWindowAggregate[]>([]);
   const [stale, setStale] = useState(false);
+  const [windowsPage, setWindowsPage] = useState(1);
 
   const effectiveAdapter = useMemo(
     () =>
@@ -105,6 +108,10 @@ export function DemoPhase4Page() {
     recompute();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount with default controls
   }, []);
+
+  useEffect(() => {
+    setWindowsPage(1);
+  }, [windows.length]);
 
   useEffect(() => {
     if (windows.length === 0) {
@@ -274,13 +281,38 @@ export function DemoPhase4Page() {
             {state.loading && windows.length === 0 ? (
               <p style={{ color: 'var(--color-text-muted)' }}>Loading…</p>
             ) : (
-              <DataTable
-                columns={columns}
-                data={windows}
-                keyFn={(r) => `${r.owner}:${r.service_id}:${r.window_id}`}
-                emptyMessage="No windows in range. Adjust dates and Recompute."
-                tableClassName="data-table--fixed data-table--wide"
-              />
+              <>
+                <DataTable
+                  columns={columns}
+                  data={windows.slice((windowsPage - 1) * WINDOWS_PAGE_SIZE, windowsPage * WINDOWS_PAGE_SIZE)}
+                  keyFn={(r) => `${r.owner}:${r.service_id}:${r.window_id}`}
+                  emptyMessage="No windows in range. Adjust dates and Recompute."
+                  tableClassName="data-table--fixed data-table--wide"
+                />
+                {windows.length > WINDOWS_PAGE_SIZE && (
+                  <div className="table-pagination" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', marginTop: 'var(--space-3)', flexWrap: 'wrap' }}>
+                    <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
+                      {(windowsPage - 1) * WINDOWS_PAGE_SIZE + 1}–{Math.min(windowsPage * WINDOWS_PAGE_SIZE, windows.length)} of {windows.length}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={windowsPage <= 1}
+                      onClick={() => setWindowsPage((p) => Math.max(1, p - 1))}
+                      style={{ padding: 'var(--space-1) var(--space-2)' }}
+                    >
+                      Previous
+                    </button>
+                    <button
+                      type="button"
+                      disabled={windowsPage >= Math.ceil(windows.length / WINDOWS_PAGE_SIZE)}
+                      onClick={() => setWindowsPage((p) => p + 1)}
+                      style={{ padding: 'var(--space-1) var(--space-2)' }}
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
