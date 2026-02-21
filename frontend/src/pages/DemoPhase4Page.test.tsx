@@ -34,7 +34,7 @@ const baseWindow: DemoWindowAggregate = {
 
 function wrap(adapter: DemoAnalyticsAdapter) {
   return (
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <DemoAdapterProvider adapter={adapter}>
         <DemoPhase4Page />
       </DemoAdapterProvider>
@@ -44,8 +44,8 @@ function wrap(adapter: DemoAnalyticsAdapter) {
 
 describe('DemoPhase4Page', () => {
   describe('slider recompute updates table deterministically', () => {
-    it('after changing control and Recompute, table reflects adapter response', async () => {
-      const callLog: unknown[] = [];
+    it('after changing control and Recompute, adapter receives new params and table reflects response', async () => {
+      const callLog: Parameters<DemoAnalyticsAdapter['getDemoWindows']>[0][] = [];
       const mockAdapter: DemoAnalyticsAdapter = {
         getDemoWindows: vi.fn().mockImplementation(async (params) => {
           callLog.push(params);
@@ -74,10 +74,19 @@ describe('DemoPhase4Page', () => {
 
       const table = screen.getByRole('table');
       expect(within(table).getByText('100')).toBeInTheDocument();
+      expect(callLog).toHaveLength(1);
+      expect(callLog[0]!.top_n).toBe(10);
+
+      const topNInput = screen.getByLabelText(/Max operators per window/i);
+      fireEvent.change(topNInput, { target: { value: '5' } });
 
       const recomputeBtn = screen.getByRole('button', { name: /Recompute/i });
       fireEvent.click(recomputeBtn);
 
+      await waitFor(() => {
+        expect(callLog).toHaveLength(2);
+        expect(callLog[1]!.top_n).toBe(5);
+      });
       await waitFor(() => {
         expect(within(table).getByText('200')).toBeInTheDocument();
       });
