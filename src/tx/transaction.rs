@@ -104,10 +104,7 @@ pub enum Transaction {
         config: crate::state::PolicyConfig,
     },
     /// Supersede a published policy version.
-    SupersedePolicyVersion {
-        scope_key: String,
-        version: u64,
-    },
+    SupersedePolicyVersion { scope_key: String, version: u64 },
 }
 
 /// Verdict for ResolveDispute (Phase 4B).

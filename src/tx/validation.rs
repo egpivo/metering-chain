@@ -899,9 +899,7 @@ fn validate_open_dispute(
     if !s.is_finalized() {
         return Err(Error::SettlementNotFinalized);
     }
-    if let (Some(window_secs), Some(finalized_at)) =
-        (s.dispute_window_secs, s.finalized_at)
-    {
+    if let (Some(window_secs), Some(finalized_at)) = (s.dispute_window_secs, s.finalized_at) {
         if let Some(now) = ctx.now {
             let deadline = finalized_at.saturating_add(window_secs);
             if now > deadline {
@@ -959,7 +957,9 @@ fn validate_resolve_dispute(
         return Err(Error::InvalidEvidenceBundle);
     }
     let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
-    let s = state.get_settlement(&sid).ok_or(Error::SettlementNotFound)?;
+    let s = state
+        .get_settlement(&sid)
+        .ok_or(Error::SettlementNotFound)?;
     // G4: bind proof to settlement window — evidence_hash must match settlement (same tx slice).
     if s.evidence_hash != *tx_evidence_hash {
         return Err(Error::ReplayMismatch);
@@ -1057,8 +1057,7 @@ fn validate_supersede_policy_version(
     tx: &SignedTx,
     authorized_minters: Option<&std::collections::HashSet<String>>,
 ) -> Result<()> {
-    let Transaction::SupersedePolicyVersion { scope_key, version } = &tx.kind
-    else {
+    let Transaction::SupersedePolicyVersion { scope_key, version } = &tx.kind else {
         unreachable!()
     };
     if let Some(minters) = authorized_minters {

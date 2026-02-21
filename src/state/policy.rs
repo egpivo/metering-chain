@@ -50,7 +50,9 @@ pub struct FeePolicy {
 
 impl FeePolicy {
     pub fn validate(&self) -> bool {
-        self.operator_share_bps.saturating_add(self.protocol_fee_bps) == BPS_MAX
+        self.operator_share_bps
+            .saturating_add(self.protocol_fee_bps)
+            == BPS_MAX
     }
 
     /// Compute operator_share and protocol_fee from gross_spent (integer division).
@@ -85,8 +87,7 @@ pub struct PolicyConfig {
 
 impl PolicyConfig {
     pub fn validate(&self) -> bool {
-        self.fee_policy.validate()
-            && self.dispute_policy.dispute_window_secs > 0
+        self.fee_policy.validate() && self.dispute_policy.dispute_window_secs > 0
     }
 
     /// Compute reserve_locked from gross_spent for this config.

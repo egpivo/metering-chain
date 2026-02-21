@@ -522,7 +522,13 @@ pub fn run(cli: Cli) -> Result<()> {
             }
 
             // Apply transaction (G4: ResolveDispute verified via apply_with_replay_verifier)
-            state = replay::apply_with_replay_verifier(&storage, &state, &signed_tx, &live_ctx, Some(&minters))?;
+            state = replay::apply_with_replay_verifier(
+                &storage,
+                &state,
+                &signed_tx,
+                &live_ctx,
+                Some(&minters),
+            )?;
             next_tx_id += 1;
 
             // Persist transaction and state
@@ -812,7 +818,13 @@ pub fn run(cli: Cli) -> Result<()> {
                 const DEFAULT_MAX_AGE: u64 = 300;
                 let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
                 live_ctx.next_tx_id = Some(next_tx_id);
-                state = replay::apply_with_replay_verifier(&storage, &state, &signed_tx, &live_ctx, Some(&minters))?;
+                state = replay::apply_with_replay_verifier(
+                    &storage,
+                    &state,
+                    &signed_tx,
+                    &live_ctx,
+                    Some(&minters),
+                )?;
                 next_tx_id += 1;
                 storage.append_tx(&signed_tx)?;
                 storage.persist_state(&state, next_tx_id)?;
@@ -868,7 +880,13 @@ pub fn run(cli: Cli) -> Result<()> {
                 const DEFAULT_MAX_AGE: u64 = 300;
                 let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
                 live_ctx.next_tx_id = Some(next_tx_id);
-                state = replay::apply_with_replay_verifier(&storage, &state, &signed_tx, &live_ctx, Some(&minters))?;
+                state = replay::apply_with_replay_verifier(
+                    &storage,
+                    &state,
+                    &signed_tx,
+                    &live_ctx,
+                    Some(&minters),
+                )?;
                 next_tx_id += 1;
                 storage.append_tx(&signed_tx)?;
                 storage.persist_state(&state, next_tx_id)?;
@@ -923,7 +941,9 @@ pub fn run(cli: Cli) -> Result<()> {
                 const DEFAULT_MAX_AGE: u64 = 300;
                 let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
                 live_ctx.next_tx_id = Some(next_tx_id);
-                state = replay::apply_with_replay_verifier(&storage, &state, &signed_tx, &live_ctx, None)?;
+                state = replay::apply_with_replay_verifier(
+                    &storage, &state, &signed_tx, &live_ctx, None,
+                )?;
                 next_tx_id += 1;
                 storage.append_tx(&signed_tx)?;
                 storage.persist_state(&state, next_tx_id)?;
@@ -989,7 +1009,13 @@ pub fn run(cli: Cli) -> Result<()> {
                 const DEFAULT_MAX_AGE: u64 = 300;
                 let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
                 live_ctx.next_tx_id = Some(next_tx_id);
-                state = replay::apply_with_replay_verifier(&storage, &state, &signed_tx, &live_ctx, Some(&minters))?;
+                state = replay::apply_with_replay_verifier(
+                    &storage,
+                    &state,
+                    &signed_tx,
+                    &live_ctx,
+                    Some(&minters),
+                )?;
                 next_tx_id += 1;
                 storage.append_tx(&signed_tx)?;
                 storage.persist_state(&state, next_tx_id)?;
@@ -1047,7 +1073,13 @@ pub fn run(cli: Cli) -> Result<()> {
                 const DEFAULT_MAX_AGE: u64 = 300;
                 let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
                 live_ctx.next_tx_id = Some(next_tx_id);
-                state = replay::apply_with_replay_verifier(&storage, &state, &signed_tx, &live_ctx, Some(&minters))?;
+                state = replay::apply_with_replay_verifier(
+                    &storage,
+                    &state,
+                    &signed_tx,
+                    &live_ctx,
+                    Some(&minters),
+                )?;
                 next_tx_id += 1;
                 storage.append_tx(&signed_tx)?;
                 storage.persist_state(&state, next_tx_id)?;
@@ -1070,17 +1102,20 @@ pub fn run(cli: Cli) -> Result<()> {
             } => {
                 let (mut state, mut next_tx_id) = load_or_create_state(&storage, &config)?;
                 let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
-                let settlement = state.get_settlement(&sid).ok_or(Error::SettlementNotFound)?;
-                let (replay_summary, _evidence_hash) = metering_chain::replay::replay_slice_to_summary(
-                    &storage,
-                    settlement.from_tx_id,
-                    settlement.to_tx_id,
-                    &owner,
-                    &service_id,
-                    settlement.operator_share,
-                    settlement.protocol_fee,
-                    settlement.reserve_locked,
-                )?;
+                let settlement = state
+                    .get_settlement(&sid)
+                    .ok_or(Error::SettlementNotFound)?;
+                let (replay_summary, _evidence_hash) =
+                    metering_chain::replay::replay_slice_to_summary(
+                        &storage,
+                        settlement.from_tx_id,
+                        settlement.to_tx_id,
+                        &owner,
+                        &service_id,
+                        settlement.operator_share,
+                        settlement.protocol_fee,
+                        settlement.reserve_locked,
+                    )?;
                 let replay_hash = replay_summary.replay_hash();
                 let verdict_enum = match verdict.to_lowercase().as_str() {
                     "upheld" => DisputeVerdict::Upheld,
@@ -1124,7 +1159,13 @@ pub fn run(cli: Cli) -> Result<()> {
                 const DEFAULT_MAX_AGE: u64 = 300;
                 let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
                 live_ctx.next_tx_id = Some(next_tx_id);
-                state = replay::apply_with_replay_verifier(&storage, &state, &signed_tx, &live_ctx, Some(&minters))?;
+                state = replay::apply_with_replay_verifier(
+                    &storage,
+                    &state,
+                    &signed_tx,
+                    &live_ctx,
+                    Some(&minters),
+                )?;
                 next_tx_id += 1;
                 storage.append_tx(&signed_tx)?;
                 storage.persist_state(&state, next_tx_id)?;
@@ -1232,9 +1273,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     .get_settlement(&sid)
                     .ok_or(Error::SettlementNotFound)?;
                 let did = metering_chain::state::DisputeId::new(&sid);
-                let d = state
-                    .get_dispute(&did)
-                    .ok_or(Error::DisputeNotFound)?;
+                let d = state.get_dispute(&did).ok_or(Error::DisputeNotFound)?;
                 let output = DisputeShowOutput {
                     settlement_key: sid.key(),
                     status: format!("{:?}", d.status),
@@ -1331,21 +1370,27 @@ pub fn run(cli: Cli) -> Result<()> {
                         wallet::verify_signature(&signed_tx)?;
                     } else if !allow_unsigned && !minters.contains(&signer) {
                         return Err(Error::SignatureVerification(
-                            "PublishPolicyVersion requires signed tx or --allow-unsigned".to_string(),
+                            "PublishPolicyVersion requires signed tx or --allow-unsigned"
+                                .to_string(),
                         ));
                     }
                     let now = metering_chain::current_timestamp().max(0) as u64;
                     const DEFAULT_MAX_AGE: u64 = 300;
                     let mut live_ctx = ValidationContext::live(now, DEFAULT_MAX_AGE);
                     live_ctx.next_tx_id = Some(next_tx_id);
-                    state = replay::apply_with_replay_verifier(&storage, &state, &signed_tx, &live_ctx, Some(&minters))?;
+                    state = replay::apply_with_replay_verifier(
+                        &storage,
+                        &state,
+                        &signed_tx,
+                        &live_ctx,
+                        Some(&minters),
+                    )?;
                     next_tx_id += 1;
                     storage.append_tx(&signed_tx)?;
                     storage.persist_state(&state, next_tx_id)?;
                     println!(
                         "Policy published: {} version {}",
-                        policy_config.fee_policy.operator_share_bps,
-                        version
+                        policy_config.fee_policy.operator_share_bps, version
                     );
                     Ok(())
                 }
@@ -1354,20 +1399,21 @@ pub fn run(cli: Cli) -> Result<()> {
                     let items: Vec<_> = state
                         .policy_versions
                         .values()
-                        .filter(|pv| {
-                            scope.as_ref().map_or(true, |s| pv.id.scope_key == *s)
+                        .filter(|pv| scope.as_ref().map_or(true, |s| pv.id.scope_key == *s))
+                        .map(|pv| {
+                            (
+                                pv.id.scope_key.clone(),
+                                pv.id.version,
+                                format!("{:?}", pv.status),
+                            )
                         })
-                        .map(|pv| (pv.id.scope_key.clone(), pv.id.version, format!("{:?}", pv.status)))
                         .collect();
                     for (sk, ver, st) in items {
                         println!("{}:{}  {}", sk, ver, st);
                     }
                     Ok(())
                 }
-                PolicySub::Show {
-                    scope_key,
-                    version,
-                } => {
+                PolicySub::Show { scope_key, version } => {
                     let (state, _) = load_or_create_state(&storage, &config)?;
                     let id = metering_chain::state::PolicyVersionId {
                         scope_key: scope_key.clone(),

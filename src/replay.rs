@@ -3,7 +3,7 @@
 //! G4: replay_tx_slice and replay_slice_to_summary for evidence-backed ResolveDispute.
 
 use crate::error::{Error, Result};
-use crate::evidence::{ReplaySummary, tx_slice_hash};
+use crate::evidence::{tx_slice_hash, ReplaySummary};
 use crate::state::{apply, SettlementId, State};
 use crate::storage::Storage;
 use crate::tx::validation::ValidationContext;
@@ -71,11 +71,7 @@ pub fn replay_up_to<S: Storage>(storage: &S, up_to_tx_id: u64) -> Result<State> 
 }
 
 /// Replay a slice of txs starting from given state; first tx has index start_tx_id (G4).
-pub fn replay_tx_slice(
-    state: &State,
-    txs: &[SignedTx],
-    start_tx_id: u64,
-) -> Result<State> {
+pub fn replay_tx_slice(state: &State, txs: &[SignedTx], start_tx_id: u64) -> Result<State> {
     let mut s = state.clone();
     for (i, tx) in txs.iter().enumerate() {
         if tx.signature.is_some() {
@@ -109,7 +105,10 @@ pub fn replay_slice_to_summary<S: Storage>(
 ) -> Result<(ReplaySummary, String)> {
     let state_from = replay_up_to(storage, from_tx_id)?;
     let txs = storage.load_txs_from(from_tx_id)?;
-    let window_txs: Vec<_> = txs.into_iter().take((to_tx_id.saturating_sub(from_tx_id)) as usize).collect();
+    let window_txs: Vec<_> = txs
+        .into_iter()
+        .take((to_tx_id.saturating_sub(from_tx_id)) as usize)
+        .collect();
     let tx_count = window_txs.len() as u64;
     let state_to = replay_tx_slice(&state_from, &window_txs, from_tx_id)?;
     let spent_from = state_from
@@ -161,7 +160,9 @@ pub fn verify_resolve_dispute_replay<S: Storage>(
         return Ok(());
     };
     let sid = SettlementId::new(owner.clone(), service_id.clone(), window_id.clone());
-    let s = state.get_settlement(&sid).ok_or(Error::SettlementNotFound)?;
+    let s = state
+        .get_settlement(&sid)
+        .ok_or(Error::SettlementNotFound)?;
     let (node_summary, node_evidence_hash) = replay_slice_to_summary(
         storage,
         s.from_tx_id,

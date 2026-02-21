@@ -114,14 +114,17 @@ export const MeteringSnapshotAdapter: MeteringAdapter = {
       .filter((w) => inDateRange(w.from_ts, w.to_ts, start_date, end_date))
       .filter((w) => !service_id || w.service_id === service_id);
 
-    const byOwner = new Map<string, { service_id: string; cost: number; window_count: number }>();
+    const key = (o: string, s: string) => `${o}\t${s}`;
+    const byOwnerService = new Map<string, { owner: string; service_id: string; cost: number; window_count: number }>();
     for (const w of windows) {
-      const cur = byOwner.get(w.owner);
+      const k = key(w.owner, w.service_id);
+      const cur = byOwnerService.get(k);
       if (cur) {
         cur.cost += w.gross_spent;
         cur.window_count += 1;
       } else {
-        byOwner.set(w.owner, {
+        byOwnerService.set(k, {
+          owner: w.owner,
           service_id: w.service_id,
           cost: w.gross_spent,
           window_count: 1,
@@ -129,9 +132,9 @@ export const MeteringSnapshotAdapter: MeteringAdapter = {
       }
     }
 
-    const list: MeteringTopOperator[] = Array.from(byOwner.entries())
-      .map(([owner, v]) => ({
-        owner,
+    const list: MeteringTopOperator[] = Array.from(byOwnerService.values())
+      .map((v) => ({
+        owner: v.owner,
         service_id: v.service_id,
         units: 0,
         cost: v.cost,

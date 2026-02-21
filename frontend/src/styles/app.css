@@ -203,21 +203,33 @@ input, select {
   color: var(--color-text);
   min-width: 160px;
 }
-button {
+button,
+.button {
+  display: inline-block;
   padding: var(--space-2) var(--space-4);
   border-radius: var(--radius);
   border: 1px solid var(--color-border);
   background: var(--color-surface-elevated);
   color: var(--color-text);
   cursor: pointer;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  text-decoration: none;
+  text-align: center;
 }
-button.primary {
+a.button:hover { background: var(--color-surface-elevated); }
+button.primary,
+a.button.primary {
   background: var(--color-accent);
   color: #fff;
   border-color: var(--color-accent);
 }
-button.primary:hover { background: var(--color-accent-hover); }
-button.danger { background: var(--color-danger); color: #fff; border-color: var(--color-danger); }
+button.primary:hover,
+a.button.primary:hover { background: var(--color-accent-hover); color: #fff; }
+button.danger,
+a.button.danger { background: var(--color-danger); color: #fff; border-color: var(--color-danger); }
+button.danger:hover,
+a.button.danger:hover { color: #fff; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Error banner */

@@ -102,7 +102,9 @@ impl EvidenceBundle {
         if self.replay_summary.tx_count != expected_count {
             return Err(Error::InvalidEvidenceBundle);
         }
-        if self.replay_summary.from_tx_id != self.from_tx_id || self.replay_summary.to_tx_id != self.to_tx_id {
+        if self.replay_summary.from_tx_id != self.from_tx_id
+            || self.replay_summary.to_tx_id != self.to_tx_id
+        {
             return Err(Error::InvalidEvidenceBundle);
         }
         Ok(())

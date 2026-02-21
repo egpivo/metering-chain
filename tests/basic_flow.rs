@@ -2966,7 +2966,10 @@ fn test_g3_publish_global_policy_v1_applies_to_new_settlements() {
     let gross_spent = 50u64;
 
     // 2. Publish global policy: 90% operator, 10% protocol, dispute_window 3600, effective at tx_id 3
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     let config = PolicyConfig {
         fee_policy: metering_chain::state::FeePolicy {
             operator_share_bps: 9000,
@@ -3005,7 +3008,10 @@ fn test_g3_publish_global_policy_v1_applies_to_new_settlements() {
     let sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w1".to_string());
     let mut ctx_propose = ValidationContext::replay();
     ctx_propose.next_tx_id = Some(4);
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -3055,7 +3061,14 @@ fn test_g3_owner_service_override_precedence() {
 
     state = apply(
         &state,
-        &SignedTx::new("authority".to_string(), 0, Transaction::Mint { to: "alice".to_string(), amount: 1000 }),
+        &SignedTx::new(
+            "authority".to_string(),
+            0,
+            Transaction::Mint {
+                to: "alice".to_string(),
+                amount: 1000,
+            },
+        ),
         &rctx,
         Some(&minters),
     )
@@ -3105,7 +3118,10 @@ fn test_g3_owner_service_override_precedence() {
     };
     let mut ctx = ValidationContext::replay();
     ctx.next_tx_id = Some(3);
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -3134,7 +3150,10 @@ fn test_g3_owner_service_override_precedence() {
         },
     };
     ctx.next_tx_id = Some(4);
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -3158,7 +3177,10 @@ fn test_g3_owner_service_override_precedence() {
     let sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w1".to_string());
     let ev_hash = evidence::evidence_hash(b"alice:storage:w1:0:3");
     ctx.next_tx_id = Some(5);
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -3185,7 +3207,10 @@ fn test_g3_owner_service_override_precedence() {
     let s = state.get_settlement(&sid).unwrap();
     assert_eq!(s.operator_share, 45);
     assert_eq!(s.protocol_fee, 5);
-    assert_eq!(s.policy_scope_key.as_deref(), Some("owner_service:alice:storage"));
+    assert_eq!(
+        s.policy_scope_key.as_deref(),
+        Some("owner_service:alice:storage")
+    );
     assert_eq!(s.dispute_window_secs, Some(7200));
 }
 
@@ -3202,7 +3227,14 @@ fn test_g3_future_effective_tx_id_uses_old_policy_before_cutover() {
 
     state = apply(
         &state,
-        &SignedTx::new("authority".to_string(), 0, Transaction::Mint { to: "alice".to_string(), amount: 1000 }),
+        &SignedTx::new(
+            "authority".to_string(),
+            0,
+            Transaction::Mint {
+                to: "alice".to_string(),
+                amount: 1000,
+            },
+        ),
         &rctx,
         Some(&minters),
     )
@@ -3252,7 +3284,10 @@ fn test_g3_future_effective_tx_id_uses_old_policy_before_cutover() {
             dispute_window_secs: 3600,
         },
     };
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -3273,7 +3308,10 @@ fn test_g3_future_effective_tx_id_uses_old_policy_before_cutover() {
     ctx.next_tx_id = Some(4);
     let sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w1".to_string());
     let ev_hash = evidence::evidence_hash(b"alice:storage:w1:0:3");
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -3312,7 +3350,10 @@ fn test_g3_future_effective_tx_id_uses_old_policy_before_cutover() {
             dispute_window_secs: 3600,
         },
     };
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     let _ = apply(
         &state,
         &SignedTx::new(
@@ -3344,7 +3385,14 @@ fn test_g3_dispute_window_from_bound_policy_snapshot() {
 
     state = apply(
         &state,
-        &SignedTx::new("authority".to_string(), 0, Transaction::Mint { to: "alice".to_string(), amount: 1000 }),
+        &SignedTx::new(
+            "authority".to_string(),
+            0,
+            Transaction::Mint {
+                to: "alice".to_string(),
+                amount: 1000,
+            },
+        ),
         &rctx,
         Some(&minters),
     )
@@ -3393,7 +3441,10 @@ fn test_g3_dispute_window_from_bound_policy_snapshot() {
     };
     let mut ctx = ValidationContext::replay();
     ctx.next_tx_id = Some(3);
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -3414,7 +3465,10 @@ fn test_g3_dispute_window_from_bound_policy_snapshot() {
     let ev_hash = evidence::evidence_hash(b"alice:storage:w2:0:3");
     let _sid = SettlementId::new("alice".to_string(), "storage".to_string(), "w2".to_string());
     ctx.next_tx_id = Some(4);
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -3440,7 +3494,10 @@ fn test_g3_dispute_window_from_bound_policy_snapshot() {
 
     let mut live_ctx = ValidationContext::live(100, 300);
     live_ctx.next_tx_id = Some(5);
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -3459,7 +3516,10 @@ fn test_g3_dispute_window_from_bound_policy_snapshot() {
 
     let mut ctx_out = ValidationContext::live(151, 300);
     ctx_out.next_tx_id = Some(6);
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     let res = apply(
         &state,
         &SignedTx::new(
@@ -3503,7 +3563,10 @@ fn test_g3_invalid_publish_rejected_with_deterministic_error() {
             dispute_window_secs: 3600,
         },
     };
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     let res = apply(
         &state,
         &SignedTx::new(
@@ -3536,7 +3599,14 @@ fn test_g3_retroactive_policy_forbidden() {
     let mut state = State::new();
     state = apply(
         &state,
-        &SignedTx::new("authority".to_string(), 0, Transaction::Mint { to: "alice".to_string(), amount: 100 }),
+        &SignedTx::new(
+            "authority".to_string(),
+            0,
+            Transaction::Mint {
+                to: "alice".to_string(),
+                amount: 100,
+            },
+        ),
         &replay_ctx(),
         Some(&minters),
     )
@@ -3712,7 +3782,10 @@ fn test_g3_replay_reconstructs_identical_policy_selection() {
         .unwrap();
         let mut ctx = ValidationContext::replay();
         ctx.next_tx_id = Some(3);
-        let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+        let auth_n = state
+            .get_account("authority")
+            .map(|a| a.nonce())
+            .unwrap_or(0);
         state = apply(
             &state,
             &SignedTx::new(
@@ -3730,7 +3803,10 @@ fn test_g3_replay_reconstructs_identical_policy_selection() {
         )
         .unwrap();
         ctx.next_tx_id = Some(4);
-        let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+        let auth_n = state
+            .get_account("authority")
+            .map(|a| a.nonce())
+            .unwrap_or(0);
         state = apply(
             &state,
             &SignedTx::new(
@@ -3831,7 +3907,10 @@ fn test_g4_resolve_dispute_requires_valid_evidence_bundle() {
     let ev_hash = metering_chain::evidence::evidence_hash(b"alice:storage:w1:0:3");
     let mut ctx = metering_chain::tx::validation::ValidationContext::replay();
     ctx.next_tx_id = Some(4);
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -3855,7 +3934,10 @@ fn test_g4_resolve_dispute_requires_valid_evidence_bundle() {
     )
     .unwrap();
     ctx.next_tx_id = Some(5);
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -3871,7 +3953,10 @@ fn test_g4_resolve_dispute_requires_valid_evidence_bundle() {
         Some(&minters),
     )
     .unwrap();
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -3894,7 +3979,10 @@ fn test_g4_resolve_dispute_requires_valid_evidence_bundle() {
         &state,
         &SignedTx::new(
             "authority".to_string(),
-            state.get_account("authority").map(|a| a.nonce()).unwrap_or(0),
+            state
+                .get_account("authority")
+                .map(|a| a.nonce())
+                .unwrap_or(0),
             Transaction::ResolveDispute {
                 owner: "alice".to_string(),
                 service_id: "storage".to_string(),
@@ -3973,7 +4061,10 @@ fn test_g4_resolve_dispute_rejects_replay_mismatch() {
     let ev_hash = metering_chain::evidence::evidence_hash(b"alice:storage:w1:0:3");
     let mut ctx = metering_chain::tx::validation::ValidationContext::replay();
     ctx.next_tx_id = Some(4);
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -3997,7 +4088,10 @@ fn test_g4_resolve_dispute_rejects_replay_mismatch() {
     )
     .unwrap();
     ctx.next_tx_id = Some(5);
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -4013,7 +4107,10 @@ fn test_g4_resolve_dispute_rejects_replay_mismatch() {
         Some(&minters),
     )
     .unwrap();
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -4039,7 +4136,10 @@ fn test_g4_resolve_dispute_rejects_replay_mismatch() {
         &state,
         &SignedTx::new(
             "authority".to_string(),
-            state.get_account("authority").map(|a| a.nonce()).unwrap_or(0),
+            state
+                .get_account("authority")
+                .map(|a| a.nonce())
+                .unwrap_or(0),
             Transaction::ResolveDispute {
                 owner: "alice".to_string(),
                 service_id: "storage".to_string(),
@@ -4118,7 +4218,10 @@ fn test_g4_resolve_dispute_rejects_wrong_window() {
     let ev_hash = metering_chain::evidence::evidence_hash(b"alice:storage:w1:0:3");
     let mut ctx = metering_chain::tx::validation::ValidationContext::replay();
     ctx.next_tx_id = Some(4);
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -4142,7 +4245,10 @@ fn test_g4_resolve_dispute_rejects_wrong_window() {
     )
     .unwrap();
     ctx.next_tx_id = Some(5);
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -4158,7 +4264,10 @@ fn test_g4_resolve_dispute_rejects_wrong_window() {
         Some(&minters),
     )
     .unwrap();
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -4184,7 +4293,10 @@ fn test_g4_resolve_dispute_rejects_wrong_window() {
         &state,
         &SignedTx::new(
             "authority".to_string(),
-            state.get_account("authority").map(|a| a.nonce()).unwrap_or(0),
+            state
+                .get_account("authority")
+                .map(|a| a.nonce())
+                .unwrap_or(0),
             Transaction::ResolveDispute {
                 owner: "alice".to_string(),
                 service_id: "storage".to_string(),
@@ -4263,7 +4375,10 @@ fn test_g4_resolve_dispute_accepts_matching_replay() {
     let ev_hash = metering_chain::evidence::evidence_hash(b"alice:storage:w1:0:3");
     let mut ctx = metering_chain::tx::validation::ValidationContext::replay();
     ctx.next_tx_id = Some(4);
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -4287,7 +4402,10 @@ fn test_g4_resolve_dispute_accepts_matching_replay() {
     )
     .unwrap();
     ctx.next_tx_id = Some(5);
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -4303,7 +4421,10 @@ fn test_g4_resolve_dispute_accepts_matching_replay() {
         Some(&minters),
     )
     .unwrap();
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -4332,7 +4453,10 @@ fn test_g4_resolve_dispute_accepts_matching_replay() {
         s.reserve_locked,
     );
     let replay_hash = replay_summary.replay_hash();
-    let auth_n = state.get_account("authority").map(|a| a.nonce()).unwrap_or(0);
+    let auth_n = state
+        .get_account("authority")
+        .map(|a| a.nonce())
+        .unwrap_or(0);
     state = apply(
         &state,
         &SignedTx::new(
@@ -4354,7 +4478,10 @@ fn test_g4_resolve_dispute_accepts_matching_replay() {
     .unwrap();
     let did = metering_chain::state::DisputeId::new(&sid);
     let d = state.get_dispute(&did).unwrap();
-    assert!(d.resolution_audit.is_some(), "G4: resolution_audit must be set");
+    assert!(
+        d.resolution_audit.is_some(),
+        "G4: resolution_audit must be set"
+    );
     let audit = d.resolution_audit.as_ref().unwrap();
     assert_eq!(audit.replay_hash, replay_hash);
     assert_eq!(audit.replay_summary.gross_spent, 50);
@@ -4384,7 +4511,11 @@ fn test_g4_evidence_bundle_roundtrip_deterministic_hash() {
 
     let bytes = bundle.canonical_bytes();
     let restored: EvidenceBundle = bincode::deserialize(&bytes).unwrap();
-    assert_eq!(restored.bundle_hash(), h1, "roundtrip must preserve bundle_hash");
+    assert_eq!(
+        restored.bundle_hash(),
+        h1,
+        "roundtrip must preserve bundle_hash"
+    );
     assert!(restored.validate_shape().is_ok());
 }
 
@@ -4441,29 +4572,15 @@ fn test_g4_replay_hash_determinism_across_replay_to_tip() {
     next_tx_id += 1;
     storage.persist_state(&state, next_tx_id).unwrap();
 
-    let (summary1, ev1) = replay::replay_slice_to_summary(
-        &storage,
-        0,
-        3,
-        "alice",
-        "storage",
-        45,
-        5,
-        0,
-    )
-    .unwrap();
-    let (summary2, ev2) = replay::replay_slice_to_summary(
-        &storage,
-        0,
-        3,
-        "alice",
-        "storage",
-        45,
-        5,
-        0,
-    )
-    .unwrap();
-    assert_eq!(summary1.replay_hash(), summary2.replay_hash(), "replay_hash determinism");
+    let (summary1, ev1) =
+        replay::replay_slice_to_summary(&storage, 0, 3, "alice", "storage", 45, 5, 0).unwrap();
+    let (summary2, ev2) =
+        replay::replay_slice_to_summary(&storage, 0, 3, "alice", "storage", 45, 5, 0).unwrap();
+    assert_eq!(
+        summary1.replay_hash(),
+        summary2.replay_hash(),
+        "replay_hash determinism"
+    );
     assert_eq!(ev1, ev2);
     assert_eq!(summary1.gross_spent, 50);
 }
@@ -4521,7 +4638,10 @@ fn test_g4_audit_fields_persist_and_replay_consistent() {
     ctx.next_tx_id = Some(next_tx_id);
     let tx_propose = SignedTx::new(
         "authority".to_string(),
-        state.get_account("authority").map(|a| a.nonce()).unwrap_or(0),
+        state
+            .get_account("authority")
+            .map(|a| a.nonce())
+            .unwrap_or(0),
         Transaction::ProposeSettlement {
             owner: "alice".to_string(),
             service_id: "storage".to_string(),
@@ -4543,7 +4663,10 @@ fn test_g4_audit_fields_persist_and_replay_consistent() {
     ctx.next_tx_id = Some(next_tx_id);
     let tx_finalize = SignedTx::new(
         "authority".to_string(),
-        state.get_account("authority").map(|a| a.nonce()).unwrap_or(0),
+        state
+            .get_account("authority")
+            .map(|a| a.nonce())
+            .unwrap_or(0),
         Transaction::FinalizeSettlement {
             owner: "alice".to_string(),
             service_id: "storage".to_string(),
@@ -4558,7 +4681,10 @@ fn test_g4_audit_fields_persist_and_replay_consistent() {
     ctx.next_tx_id = Some(next_tx_id);
     let tx_open = SignedTx::new(
         "authority".to_string(),
-        state.get_account("authority").map(|a| a.nonce()).unwrap_or(0),
+        state
+            .get_account("authority")
+            .map(|a| a.nonce())
+            .unwrap_or(0),
         Transaction::OpenDispute {
             owner: "alice".to_string(),
             service_id: "storage".to_string(),
@@ -4587,7 +4713,10 @@ fn test_g4_audit_fields_persist_and_replay_consistent() {
     ctx.next_tx_id = Some(next_tx_id);
     let tx_resolve = SignedTx::new(
         "authority".to_string(),
-        state.get_account("authority").map(|a| a.nonce()).unwrap_or(0),
+        state
+            .get_account("authority")
+            .map(|a| a.nonce())
+            .unwrap_or(0),
         Transaction::ResolveDispute {
             owner: "alice".to_string(),
             service_id: "storage".to_string(),

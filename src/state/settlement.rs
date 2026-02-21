@@ -111,12 +111,7 @@ impl Settlement {
     }
 
     /// G3: set bound policy snapshot (called from apply when policy was resolved).
-    pub fn set_bound_policy(
-        &mut self,
-        scope_key: String,
-        version: u64,
-        dispute_window_secs: u64,
-    ) {
+    pub fn set_bound_policy(&mut self, scope_key: String, version: u64, dispute_window_secs: u64) {
         self.policy_scope_key = Some(scope_key);
         self.policy_version = Some(version);
         self.dispute_window_secs = Some(dispute_window_secs);

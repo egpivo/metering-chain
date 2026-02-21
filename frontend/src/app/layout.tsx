@@ -19,6 +19,7 @@ export function Layout({ children }: { children?: React.ReactNode }) {
             <li><NavLink to="/settlements" className={({ isActive }) => isActive ? 'active' : ''}>Settlements</NavLink></li>
             <li><NavLink to="/disputes" className={({ isActive }) => isActive ? 'active' : ''}>Disputes</NavLink></li>
             <li><NavLink to="/policy" className={({ isActive }) => isActive ? 'active' : ''}>Policy</NavLink></li>
+            <li><NavLink to="/audit/data" className={({ isActive }) => isActive ? 'active' : ''}>Data Source</NavLink></li>
           </ul>
         </nav>
         <main className="app-main">

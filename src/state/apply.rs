@@ -543,7 +543,9 @@ fn apply_resolve_dispute(
         service_id.to_string(),
         window_id.to_string(),
     );
-    let s = state.get_settlement(&sid).ok_or(Error::SettlementNotFound)?;
+    let s = state
+        .get_settlement(&sid)
+        .ok_or(Error::SettlementNotFound)?;
     // G4: bind proof to settlement window (defense in depth).
     if s.evidence_hash != evidence_hash {
         return Err(Error::ReplayMismatch);
@@ -631,7 +633,9 @@ fn apply_supersede_policy_version(
         scope_key: scope_key.to_string(),
         version,
     };
-    let pv = state.get_policy_version_mut(&id).ok_or(Error::PolicyNotFound)?;
+    let pv = state
+        .get_policy_version_mut(&id)
+        .ok_or(Error::PolicyNotFound)?;
     pv.status = PolicyVersionStatus::Superseded;
     let signer_account = state.get_or_create_account(signer);
     signer_account.increment_nonce();
