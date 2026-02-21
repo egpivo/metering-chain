@@ -13,21 +13,13 @@ export function Layout({ children }: { children?: React.ReactNode }) {
       </header>
       <div className="app-body">
         <nav className="app-nav">
-          <h2>Operations</h2>
-        <ul>
-          <li><NavLink to="/settlements" end className={({ isActive }) => isActive ? 'active' : ''}>Settlements</NavLink></li>
-          <li><NavLink to="/claims" className={({ isActive }) => isActive ? 'active' : ''}>Claims</NavLink></li>
-          <li><NavLink to="/disputes" className={({ isActive }) => isActive ? 'active' : ''}>Disputes</NavLink></li>
-        </ul>
-        <h2>Governance</h2>
-        <ul>
-          <li><NavLink to="/policy" className={({ isActive }) => isActive ? 'active' : ''}>Policy</NavLink></li>
-        </ul>
-        <h2>Audit</h2>
-        <ul>
-          <li><NavLink to="/audit/explorer" className={({ isActive }) => isActive ? 'active' : ''}>Explorer</NavLink></li>
-          <li><NavLink to="/audit/data" className={({ isActive }) => isActive ? 'active' : ''}>Data Source</NavLink></li>
-        </ul>
+          <ul>
+            <li><NavLink to="/overview" end className={({ isActive }) => isActive ? 'active' : ''}>Overview</NavLink></li>
+            <li><NavLink to="/metering" className={({ isActive }) => isActive ? 'active' : ''}>Metering</NavLink></li>
+            <li><NavLink to="/settlements" className={({ isActive }) => isActive ? 'active' : ''}>Settlements</NavLink></li>
+            <li><NavLink to="/disputes" className={({ isActive }) => isActive ? 'active' : ''}>Disputes</NavLink></li>
+            <li><NavLink to="/policy" className={({ isActive }) => isActive ? 'active' : ''}>Policy</NavLink></li>
+          </ul>
         </nav>
         <main className="app-main">
           {children ?? <Outlet />}

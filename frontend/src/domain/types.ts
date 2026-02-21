@@ -144,3 +144,48 @@ export interface DemoUiState {
 
 /** Compare status for evidence panel */
 export type DemoCompareStatus = 'MATCH' | 'MISMATCH' | 'MISSING';
+
+// --- Metering (phase4_metering_ui_reframe) ---
+
+export interface MeteringSeriesPoint {
+  ts: string;
+  units: number;
+  cost: number;
+  owner_count?: number;
+  window_count?: number;
+}
+
+export interface MeteringWindowPreview {
+  window_id: string;
+  from_ts: string;
+  to_ts: string;
+  usage_count: number;
+  operator_count: number;
+  gross_spent: number;
+  owner?: string;
+  service_id?: string;
+}
+
+export interface MeteringTopOperator {
+  owner: string;
+  service_id: string;
+  units: number;
+  cost: number;
+  window_count: number;
+}
+
+export interface MeteringCounters {
+  total_units: number;
+  active_operators: number;
+  windows_in_range: number;
+  anomalies: number;
+  /** Total cost (gross_spent) in range; used for "Total spent" in UI */
+  total_cost?: number;
+}
+
+export interface MeteringAdapter {
+  getMeteringSeries(params: { start_date: string; end_date: string; granularity: 'day' | 'week'; service_id?: string }): Promise<MeteringSeriesPoint[]>;
+  getMeteringTopOperators(params: { start_date: string; end_date: string; limit?: number; service_id?: string }): Promise<MeteringTopOperator[]>;
+  getWindowPreview(params: { start_date: string; end_date: string; service_id?: string }): Promise<{ count: number; windows: MeteringWindowPreview[] }>;
+  getMeteringCounters(params: { start_date: string; end_date: string; service_id?: string }): Promise<MeteringCounters>;
+}
