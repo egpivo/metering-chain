@@ -359,3 +359,27 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     grid-template-columns: 1fr;
   }
 }
+
+/* Settlement detail: fixed Execution Gate (right column sticky) */
+.settlement-detail-layout {
+  display: grid;
+  grid-template-columns: 1fr minmax(320px, 400px);
+  gap: var(--space-6);
+  align-items: start;
+}
+.execution-gate-wrap {
+  position: sticky;
+  top: var(--space-4);
+}
+.execution-gate-wrap .card,
+.execution-gate-wrap .action-panel {
+  margin-bottom: var(--space-4);
+}
+@media (max-width: 900px) {
+  .settlement-detail-layout {
+    grid-template-columns: 1fr;
+  }
+  .execution-gate-wrap {
+    position: static;
+  }
+}

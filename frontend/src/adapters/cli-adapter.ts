@@ -161,8 +161,17 @@ export function createCliAdapter(config: CliAdapterConfig = {}): FrontendDataAda
       if (filters?.status) args.push('--status', filters.status);
       const { stdout, stderr, exitCode } = await exec(args);
       if (exitCode !== 0) throw parseCliStderr(stderr);
-      const data = JSON.parse(stdout || '{"settlements":[]}') as { settlements: unknown[] };
-      return (data.settlements || []).map((s) => mapListToSettlementView(s as Parameters<typeof mapListToSettlementView>[0]));
+      const raw = (JSON.parse(stdout || '{"settlements":[]}') as { settlements: unknown[] }).settlements || [];
+      let list = raw.map((s) => mapListToSettlementView(s as Parameters<typeof mapListToSettlementView>[0]));
+      if (filters?.start_date || filters?.end_date) {
+        list = list.filter((s) => {
+          const w = s.window_id ?? '';
+          if (filters!.start_date && w < filters!.start_date!) return false;
+          if (filters!.end_date && w > filters!.end_date!) return false;
+          return true;
+        });
+      }
+      return list;
     },
     async getSettlement(owner, serviceId, windowId) {
       const { stdout, exitCode } = await exec([

@@ -79,6 +79,9 @@ export type ListSettlementsFilters = {
   owner?: string;
   service_id?: string;
   status?: string;
+  /** Window date range (window_id format YYYY-MM-DD); from Metering deep link */
+  start_date?: string;
+  end_date?: string;
 };
 
 export type ListPolicyFilters = { scope?: string };
@@ -174,6 +177,17 @@ export interface MeteringTopOperator {
   window_count: number;
 }
 
+/** One item for Anomaly rail (e.g. disputed window, missing replay). */
+export interface MeteringAnomalyItem {
+  id: string;
+  kind: 'spike' | 'missing' | 'replay_gap' | 'disputed';
+  label: string;
+  /** For linking to settlement detail */
+  window_id?: string;
+  owner?: string;
+  service_id?: string;
+}
+
 export interface MeteringCounters {
   total_units: number;
   active_operators: number;
@@ -181,6 +195,8 @@ export interface MeteringCounters {
   anomalies: number;
   /** Total cost (gross_spent) in range; used for "Total spent" in UI */
   total_cost?: number;
+  /** Optional items for Anomaly rail (e.g. disputed windows, replay gaps). */
+  anomaly_items?: MeteringAnomalyItem[];
 }
 
 export interface MeteringAdapter {

@@ -64,6 +64,8 @@ function filterSettlements(list: SettlementView[], f?: ListSettlementsFilters): 
     if (f.owner && s.owner !== f.owner) return false;
     if (f.service_id && s.service_id !== f.service_id) return false;
     if (f.status && !s.status.toLowerCase().includes(f.status.toLowerCase())) return false;
+    if (f.start_date && s.window_id < f.start_date) return false;
+    if (f.end_date && s.window_id > f.end_date) return false;
     return true;
   });
 }

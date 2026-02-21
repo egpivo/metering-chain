@@ -8,6 +8,7 @@ import type {
   MeteringSeriesPoint,
   MeteringTopOperator,
   MeteringWindowPreview,
+  MeteringAnomalyItem,
 } from '../domain/types';
 
 const SNAPSHOT_URL = '/demo_data/phase4_snapshot.json';
@@ -22,6 +23,9 @@ interface SnapshotWindowRaw {
   operator_count: number;
   from_tx_id?: number;
   to_tx_id?: number;
+  status?: string;
+  replay_summary?: unknown;
+  replay_hash?: string | null;
 }
 
 interface SnapshotPayload {
@@ -170,12 +174,41 @@ export const MeteringSnapshotAdapter: MeteringAdapter = {
     const active_operators = new Set(windows.map((w) => w.owner)).size;
     const totalCost = windows.reduce((s, w) => s + w.gross_spent, 0);
 
+    const anomaly_items: MeteringAnomalyItem[] = [];
+    for (const w of windows) {
+      const status = (w.status ?? '').toLowerCase();
+      const isDisputed = status.includes('disputed');
+      const missingReplay = w.replay_summary == null && w.replay_hash == null;
+      const id = `${w.owner}-${w.service_id}-${w.window_id}`;
+      if (isDisputed) {
+        anomaly_items.push({
+          id: `${id}-disputed`,
+          kind: 'disputed',
+          label: `${w.window_id} (${w.owner.slice(0, 8)}…) — disputed`,
+          window_id: w.window_id,
+          owner: w.owner,
+          service_id: w.service_id,
+        });
+      } else if (missingReplay && (status.includes('proposed') || status.includes('finalized'))) {
+        anomaly_items.push({
+          id: `${id}-replay_gap`,
+          kind: 'replay_gap',
+          label: `${w.window_id} (${w.owner.slice(0, 8)}…) — no replay`,
+          window_id: w.window_id,
+          owner: w.owner,
+          service_id: w.service_id,
+        });
+      }
+    }
+    const anomalies = anomaly_items.length;
+
     return {
       total_units,
       active_operators,
       windows_in_range: windows.length,
-      anomalies: 0,
+      anomalies,
       total_cost: totalCost,
+      anomaly_items,
     };
   },
 };

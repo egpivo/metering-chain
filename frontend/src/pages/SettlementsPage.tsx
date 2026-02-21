@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useAdapter } from '../adapters/context';
 import { DataTable, type Column } from '../components/DataTable';
 import { StatusBadge } from '../components/StatusBadge';
@@ -14,19 +14,35 @@ function settlementShortLabel(r: SettlementView): string {
 
 export function SettlementsPage() {
   const adapter = useAdapter();
+  const [searchParams] = useSearchParams();
   const [list, setList] = useState<SettlementView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<{ error_code: string; message: string; suggested_action: string } | null>(null);
   const [owner, setOwner] = useState('');
   const [serviceId, setServiceId] = useState('');
   const [status, setStatus] = useState('');
+  const [startDate, setStartDate] = useState(() => searchParams.get('start_date') ?? '');
+  const [endDate, setEndDate] = useState(() => searchParams.get('end_date') ?? '');
+
+  useEffect(() => {
+    const s = searchParams.get('start_date');
+    const e = searchParams.get('end_date');
+    if (s != null) setStartDate(s);
+    if (e != null) setEndDate(e);
+  }, [searchParams]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
     adapter
-      .listSettlements({ owner: owner || undefined, service_id: serviceId || undefined, status: status || undefined })
+      .listSettlements({
+        owner: owner || undefined,
+        service_id: serviceId || undefined,
+        status: status || undefined,
+        start_date: startDate || undefined,
+        end_date: endDate || undefined,
+      })
       .then((data) => {
         if (!cancelled) setList(data);
       })
@@ -41,7 +57,7 @@ export function SettlementsPage() {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [adapter, owner, serviceId, status]);
+  }, [adapter, owner, serviceId, status, startDate, endDate]);
 
   const columns: Column<SettlementView>[] = [
     {
@@ -80,6 +96,12 @@ export function SettlementsPage() {
           </label>
           <label>
             Status <input value={status} onChange={(e) => setStatus(e.target.value)} placeholder="e.g. Finalized" />
+          </label>
+          <label>
+            From date <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+          </label>
+          <label>
+            To date <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
           </label>
         </div>
       </div>

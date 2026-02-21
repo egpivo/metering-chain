@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { MeteringSnapshotAdapter } from '../adapters/metering-snapshot-adapter';
+import { UsageHeatmap } from '../components/UsageHeatmap';
+import { AnomalyRail } from '../components/AnomalyRail';
 import { formatInteger } from '../utils/format';
 import type {
   MeteringCounters,
@@ -116,6 +118,8 @@ export function MeteringPage() {
             </div>
           </section>
 
+          <AnomalyRail count={counters.anomalies} items={counters.anomaly_items ?? []} />
+
           {/* Usage timeline */}
           <section className="card" style={{ marginBottom: 'var(--space-4)' }} aria-label="Usage timeline">
             <h3 style={{ marginTop: 0 }}>Usage timeline</h3>
@@ -144,6 +148,7 @@ export function MeteringPage() {
               ))}
               {series.length > 5 && <span>…</span>}
             </div>
+            <UsageHeatmap series={series} granularity={granularity} />
           </section>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 'var(--space-4)' }}>
@@ -204,13 +209,21 @@ export function MeteringPage() {
                       ))}
                     </tbody>
                   </table>
-                  <Link to="/settlements" className="button primary" style={{ display: 'inline-block' }}>
-                    View all in Settlements →
+                  <Link
+                    to={`/settlements?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`}
+                    className="button primary"
+                    style={{ display: 'inline-block' }}
+                  >
+                    Open in Settlements →
                   </Link>
                 </>
               ) : (
-                <Link to="/settlements" className="button primary" style={{ display: 'inline-block' }}>
-                  Open Settlements
+                <Link
+                  to={`/settlements?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`}
+                  className="button primary"
+                  style={{ display: 'inline-block' }}
+                >
+                  Open in Settlements
                 </Link>
               )}
             </section>

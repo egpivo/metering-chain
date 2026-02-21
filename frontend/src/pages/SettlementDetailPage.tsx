@@ -81,55 +81,61 @@ export function SettlementDetailPage() {
   if (!settlement) return <p>Settlement not found.</p>;
 
   return (
-    <div>
+    <div className="settlement-detail-page">
       <h1 style={{ marginBottom: 'var(--space-2)' }}>Settlement: {settlement.settlement_id}</h1>
       <p style={{ color: 'var(--color-text-muted)', marginBottom: 'var(--space-4)' }}>
         <StatusBadge kind="settlement" status={settlement.status} />
       </p>
       {actionError && <ErrorBanner error={actionError} onDismiss={() => setActionError(null)} />}
 
-      <div className="card">
-        <h3>Status</h3>
-        <Timeline steps={steps} />
+      <div className="settlement-detail-layout">
+        <div className="settlement-detail-main">
+          <div className="card">
+            <h3>Status</h3>
+            <Timeline steps={steps} />
+          </div>
+          <div className="card">
+            <h3>Economics</h3>
+            <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 'var(--space-2) var(--space-4)' }}>
+              <dt style={{ color: 'var(--color-text-muted)' }}>Gross spent</dt><dd>{settlement.gross_spent}</dd>
+              <dt style={{ color: 'var(--color-text-muted)' }}>Operator share</dt><dd>{settlement.operator_share}</dd>
+              <dt style={{ color: 'var(--color-text-muted)' }}>Protocol fee</dt><dd>{settlement.protocol_fee}</dd>
+              <dt style={{ color: 'var(--color-text-muted)' }}>Reserve locked</dt><dd>{settlement.reserve_locked}</dd>
+              <dt style={{ color: 'var(--color-text-muted)' }}>Payable</dt><dd>{settlement.payable}</dd>
+              <dt style={{ color: 'var(--color-text-muted)' }}>Total paid</dt><dd>{settlement.total_paid}</dd>
+            </dl>
+          </div>
+        </div>
+        <aside className="execution-gate-wrap" aria-label="Execution Gate">
+          <div className="card">
+            <h3>Integrity</h3>
+            <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 'var(--space-2) var(--space-4)' }}>
+              <dt style={{ color: 'var(--color-text-muted)' }}>Evidence hash</dt><dd className="mono">{settlement.evidence_hash}</dd>
+              <dt style={{ color: 'var(--color-text-muted)' }}>Replay hash</dt><dd className="mono">{settlement.replay_hash ?? '—'}</dd>
+              <dt style={{ color: 'var(--color-text-muted)' }}>Tx range</dt><dd className="mono">{settlement.from_tx_id} … {settlement.to_tx_id}</dd>
+            </dl>
+          </div>
+          {evidence && (
+            <EvidenceCompareCard
+              bundle={evidence}
+              recorded={{
+                gross_spent: settlement.gross_spent,
+                operator_share: settlement.operator_share,
+                protocol_fee: settlement.protocol_fee,
+                reserve_locked: settlement.reserve_locked,
+              }}
+            />
+          )}
+          <ActionPanel
+            title="Actions"
+            actions={[
+              { label: 'Finalize Settlement', onClick: handleFinalize, variant: 'primary', disabled: !isProposed },
+              { label: 'Open Dispute', onClick: handleOpenDispute, variant: 'danger', disabled: !isFinalized },
+              { label: 'Back to list', onClick: () => navigate('/settlements') },
+            ]}
+          />
+        </aside>
       </div>
-      <div className="card">
-        <h3>Economics</h3>
-        <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 'var(--space-2) var(--space-4)' }}>
-          <dt style={{ color: 'var(--color-text-muted)' }}>Gross spent</dt><dd>{settlement.gross_spent}</dd>
-          <dt style={{ color: 'var(--color-text-muted)' }}>Operator share</dt><dd>{settlement.operator_share}</dd>
-          <dt style={{ color: 'var(--color-text-muted)' }}>Protocol fee</dt><dd>{settlement.protocol_fee}</dd>
-          <dt style={{ color: 'var(--color-text-muted)' }}>Reserve locked</dt><dd>{settlement.reserve_locked}</dd>
-          <dt style={{ color: 'var(--color-text-muted)' }}>Payable</dt><dd>{settlement.payable}</dd>
-          <dt style={{ color: 'var(--color-text-muted)' }}>Total paid</dt><dd>{settlement.total_paid}</dd>
-        </dl>
-      </div>
-      <div className="card">
-        <h3>Integrity</h3>
-        <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 'var(--space-2) var(--space-4)' }}>
-          <dt style={{ color: 'var(--color-text-muted)' }}>Evidence hash</dt><dd className="mono">{settlement.evidence_hash}</dd>
-          <dt style={{ color: 'var(--color-text-muted)' }}>Replay hash</dt><dd className="mono">{settlement.replay_hash ?? '—'}</dd>
-          <dt style={{ color: 'var(--color-text-muted)' }}>Tx range</dt><dd className="mono">{settlement.from_tx_id} … {settlement.to_tx_id}</dd>
-        </dl>
-      </div>
-      {evidence && (
-        <EvidenceCompareCard
-          bundle={evidence}
-          recorded={{
-            gross_spent: settlement.gross_spent,
-            operator_share: settlement.operator_share,
-            protocol_fee: settlement.protocol_fee,
-            reserve_locked: settlement.reserve_locked,
-          }}
-        />
-      )}
-      <ActionPanel
-        title="Actions"
-        actions={[
-          { label: 'Finalize Settlement', onClick: handleFinalize, variant: 'primary', disabled: !isProposed },
-          { label: 'Open Dispute', onClick: handleOpenDispute, variant: 'danger', disabled: !isFinalized },
-          { label: 'Back to list', onClick: () => navigate('/settlements') },
-        ]}
-      />
     </div>
   );
 }
