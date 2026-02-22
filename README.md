@@ -111,6 +111,14 @@ cargo run --bin metering-chain -- --format json account <address>
 
 ---
 
+## Release and compatibility
+
+* **Versioning:** Crate uses SemVer. Domain records (Settlement, Dispute, EvidenceBundle, PolicyVersion) include `schema_version`; replay uses `replay_protocol_version`. Unsupported versions are rejected with deterministic error codes.
+* **Error codes:** See `docs/error_codes.md` for the full taxonomy (including `UNSUPPORTED_SCHEMA_VERSION`, `REPLAY_PROTOCOL_MISMATCH`, `MIGRATION_REQUIRED`).
+* **Audit:** `settlement show`, `dispute show`, and `evidence show` expose schema and replay protocol versions for troubleshooting.
+
+---
+
 ## Features
 
 * Deterministic state transitions
@@ -130,6 +138,11 @@ cargo run --bin metering-chain -- --format json account <address>
 * `docs/error_codes.md` – Error taxonomy for UI mapping
 * `docs/validation_flow.md` – Validation pipeline (auth → domain → replay/evidence)
 * `docs/naming_conventions.md` – Tx/event naming (Phase 4 ready)
+* `docs/replay_audit_runbook.md` – Replay/audit troubleshooting and one-command audit chain
+* `docs/final_demo.md` – Final demo script and expected outputs (run from docs only)
+* `docs/RELEASE_NOTES.md` – Release notes draft (breaking / feature / fix)
+* `docs/closure_scope.md` – Release closure scope (freeze, tag, sign-off)
+* `docs/PRE_RELEASE_CHECKLIST.md` – Pre-release checklist (GO/NO-GO)
 
 ## Architecture
 

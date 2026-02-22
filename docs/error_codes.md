@@ -62,6 +62,16 @@ Use `Error::error_code()` for deterministic UI mapping.
 | `REPLAY_MISMATCH` | ReplayMismatch | Replay result does not match settlement totals or replay_hash |
 | `EVIDENCE_NOT_FOUND` | EvidenceNotFound | Evidence or bundle not found (optional storage) |
 
+### Phase 4+ Versioning (final hardening)
+
+| Code | Variant | Suggested UI action |
+|------|---------|---------------------|
+| `UNSUPPORTED_SCHEMA_VERSION` | UnsupportedSchemaVersion | Reader does not support this record schema version; upgrade binary or run migration |
+| `UNSUPPORTED_TX_VERSION` | UnsupportedTxVersion | Transaction envelope version not supported |
+| `UNSUPPORTED_EVENT_VERSION` | UnsupportedEventVersion | Event envelope version not supported |
+| `REPLAY_PROTOCOL_MISMATCH` | ReplayProtocolMismatch | Replay hash/serialization contract changed; do not mix protocol versions |
+| `MIGRATION_REQUIRED` | MigrationRequired | Data must be upgraded (e.g. upcaster) before use |
+
 ### Phase 4 Validation Error Matrix (by Tx Type)
 
 | Tx Type | Possible Error Codes |

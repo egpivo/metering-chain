@@ -555,6 +555,8 @@ fn apply_resolve_dispute(
         return Err(Error::ReplayMismatch);
     }
     let bundle = crate::evidence::EvidenceBundle {
+        schema_version: crate::evidence::CURRENT_EVIDENCE_SCHEMA_VERSION,
+        replay_protocol_version: crate::evidence::REPLAY_PROTOCOL_VERSION,
         settlement_key: sid.key(),
         from_tx_id: s.from_tx_id,
         to_tx_id: s.to_tx_id,
@@ -581,6 +583,7 @@ fn apply_resolve_dispute(
     };
     dispute.resolve(status);
     dispute.set_resolution_audit(crate::state::ResolutionAudit {
+        replay_protocol_version: crate::evidence::REPLAY_PROTOCOL_VERSION,
         replay_hash: replay_hash.to_string(),
         replay_summary: replay_summary.clone(),
     });
@@ -610,6 +613,7 @@ fn apply_publish_policy_version(
         version,
     };
     let pv = PolicyVersion {
+        schema_version: 1,
         id: id.clone(),
         scope,
         effective_from_tx_id,

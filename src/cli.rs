@@ -1233,6 +1233,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     .unwrap_or((None, None));
                 let output = SettlementShowOutput {
                     settlement_id: sid.key(),
+                    schema_version: s.schema_version,
                     owner: s.id.owner.clone(),
                     service_id: s.id.service_id.clone(),
                     window_id: s.id.window_id.clone(),
@@ -1276,8 +1277,10 @@ pub fn run(cli: Cli) -> Result<()> {
                 let d = state.get_dispute(&did).ok_or(Error::DisputeNotFound)?;
                 let output = DisputeShowOutput {
                     settlement_key: sid.key(),
+                    schema_version: d.schema_version,
                     status: format!("{:?}", d.status),
                     resolution_audit: d.resolution_audit.as_ref().map(|a| ResolutionAuditOutput {
+                        replay_protocol_version: a.replay_protocol_version,
                         replay_hash: a.replay_hash.clone(),
                         replay_summary: a.replay_summary.clone(),
                     }),
@@ -1296,6 +1299,8 @@ pub fn run(cli: Cli) -> Result<()> {
                     .get_evidence_bundle(&sid)
                     .ok_or(Error::EvidenceNotFound)?;
                 let output = EvidenceShowOutput {
+                    schema_version: bundle.schema_version,
+                    replay_protocol_version: bundle.replay_protocol_version,
                     settlement_key: bundle.settlement_key.clone(),
                     from_tx_id: bundle.from_tx_id,
                     to_tx_id: bundle.to_tx_id,
@@ -1582,6 +1587,8 @@ struct ClaimSummaryOutput {
 #[derive(Debug, serde::Serialize)]
 struct SettlementShowOutput {
     settlement_id: String,
+    /// Schema version of the settlement record (versioning policy).
+    schema_version: u16,
     owner: String,
     service_id: String,
     window_id: String,
@@ -1604,6 +1611,7 @@ struct SettlementShowOutput {
 
 #[derive(Debug, serde::Serialize)]
 struct ResolutionAuditOutput {
+    replay_protocol_version: u16,
     replay_hash: String,
     replay_summary: metering_chain::evidence::ReplaySummary,
 }
@@ -1611,12 +1619,15 @@ struct ResolutionAuditOutput {
 #[derive(Debug, serde::Serialize)]
 struct DisputeShowOutput {
     settlement_key: String,
+    schema_version: u16,
     status: String,
     resolution_audit: Option<ResolutionAuditOutput>,
 }
 
 #[derive(Debug, serde::Serialize)]
 struct EvidenceShowOutput {
+    schema_version: u16,
+    replay_protocol_version: u16,
     settlement_key: String,
     from_tx_id: u64,
     to_tx_id: u64,
