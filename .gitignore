@@ -24,3 +24,11 @@ target
 .local/
 .metering-chain/
 .env
+
+# Frontend (Vite/Node) — do not commit build artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/tsconfig.node.tsbuildinfo
+frontend/tsconfig.tsbuildinfo
+frontend/vite.config.d.ts
+frontend/vite.config.js

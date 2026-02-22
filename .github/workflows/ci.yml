@@ -74,5 +74,13 @@ jobs:
 
       - name: Generate coverage
         run: cargo llvm-cov --workspace --summary-only
+      - name: Generate lcov for Codecov
+        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: egpivo/metering-chain
+          fail_ci_if_error: false
       - name: Coverage gate (global line coverage ≥ 50%, raise to 70% per policy)
         run: cargo llvm-cov --workspace --fail-under-lines 50
