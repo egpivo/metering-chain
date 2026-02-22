@@ -126,6 +126,9 @@ impl PolicyVersionId {
 /// Policy version aggregate (G3).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PolicyVersion {
+    /// Schema version for this record; reader must support <= current.
+    #[serde(default)]
+    pub schema_version: u16,
     pub id: PolicyVersionId,
     pub scope: PolicyScope,
     pub effective_from_tx_id: u64,

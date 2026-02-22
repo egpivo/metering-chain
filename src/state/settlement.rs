@@ -56,6 +56,9 @@ impl SettlementId {
 /// Settlement aggregate (Phase 4A). Phase 4C (G3): optional policy snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Settlement {
+    /// Schema version for this record; reader must support <= current.
+    #[serde(default)]
+    pub schema_version: u16,
     pub id: SettlementId,
     pub gross_spent: u64,
     pub operator_share: u64,
@@ -93,6 +96,7 @@ impl Settlement {
         to_tx_id: u64,
     ) -> Self {
         Settlement {
+            schema_version: 1,
             id,
             gross_spent,
             operator_share,
@@ -251,6 +255,9 @@ impl DisputeId {
 /// Resolution audit for a dispute (G4): replay proof persisted when dispute is resolved.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResolutionAudit {
+    /// Replay protocol version used for this resolution (audit trail).
+    #[serde(default)]
+    pub replay_protocol_version: u16,
     pub replay_hash: String,
     pub replay_summary: ReplaySummary,
 }
@@ -258,6 +265,9 @@ pub struct ResolutionAudit {
 /// Dispute aggregate (Phase 4B). G4: optional resolution_audit when resolved.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Dispute {
+    /// Schema version for this record; reader must support <= current.
+    #[serde(default)]
+    pub schema_version: u16,
     pub id: DisputeId,
     pub target_settlement_id: SettlementId,
     pub reason_code: String,
@@ -279,6 +289,7 @@ impl Dispute {
     ) -> Self {
         let id = DisputeId::new(&target_settlement_id);
         Dispute {
+            schema_version: 1,
             id,
             target_settlement_id,
             reason_code,

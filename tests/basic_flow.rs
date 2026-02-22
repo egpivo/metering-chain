@@ -4498,6 +4498,8 @@ fn test_g4_evidence_bundle_roundtrip_deterministic_hash() {
     let summary = ReplaySummary::new(0, 3, 3, 50, 45, 5, 0);
     let replay_hash = summary.replay_hash();
     let bundle = EvidenceBundle {
+        schema_version: metering_chain::evidence::CURRENT_EVIDENCE_SCHEMA_VERSION,
+        replay_protocol_version: metering_chain::evidence::REPLAY_PROTOCOL_VERSION,
         settlement_key: "alice:storage:w1".to_string(),
         from_tx_id: 0,
         to_tx_id: 3,

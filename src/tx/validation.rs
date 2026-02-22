@@ -970,6 +970,8 @@ fn validate_resolve_dispute(
     }
     // G4: validate evidence bundle shape (from/to, tx_count, replay_summary window consistency).
     let bundle = crate::evidence::EvidenceBundle {
+        schema_version: crate::evidence::CURRENT_EVIDENCE_SCHEMA_VERSION,
+        replay_protocol_version: crate::evidence::REPLAY_PROTOCOL_VERSION,
         settlement_key: sid.key(),
         from_tx_id: s.from_tx_id,
         to_tx_id: s.to_tx_id,

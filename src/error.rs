@@ -43,6 +43,11 @@ impl Error {
             InvalidEvidenceBundle => "INVALID_EVIDENCE_BUNDLE",
             ReplayMismatch => "REPLAY_MISMATCH",
             EvidenceNotFound => "EVIDENCE_NOT_FOUND",
+            UnsupportedSchemaVersion => "UNSUPPORTED_SCHEMA_VERSION",
+            UnsupportedTxVersion => "UNSUPPORTED_TX_VERSION",
+            UnsupportedEventVersion => "UNSUPPORTED_EVENT_VERSION",
+            ReplayProtocolMismatch => "REPLAY_PROTOCOL_MISMATCH",
+            MigrationRequired => "MIGRATION_REQUIRED",
         }
     }
 }
@@ -150,6 +155,18 @@ pub enum Error {
     ReplayMismatch,
     #[error("Evidence or bundle not found")]
     EvidenceNotFound,
+
+    // Phase 4+ Versioning (final hardening)
+    #[error("Unsupported schema version (reader does not support this record version)")]
+    UnsupportedSchemaVersion,
+    #[error("Unsupported transaction version")]
+    UnsupportedTxVersion,
+    #[error("Unsupported event version")]
+    UnsupportedEventVersion,
+    #[error("Replay protocol version mismatch (hash/serialization contract changed)")]
+    ReplayProtocolMismatch,
+    #[error("Migration required (data must be upgraded before use)")]
+    MigrationRequired,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

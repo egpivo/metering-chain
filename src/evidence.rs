@@ -1,8 +1,14 @@
 //! Evidence and replay interfaces for Phase 4 Settlement/Dispute (G4).
 //!
 //! See `.local/phase4_spec.md` and `.local/phase4_g4_tasks.md` for EvidenceBundle schema.
+//! Versioning: schema_version and replay_protocol_version for deterministic reject paths (Phase 4+ hardening).
 
 use crate::error::{Error, Result};
+
+/// Current evidence bundle schema version. Readers must support <= this.
+pub const CURRENT_EVIDENCE_SCHEMA_VERSION: u16 = 1;
+/// Replay hash/serialization contract version. Mismatch => ReplayProtocolMismatch.
+pub const REPLAY_PROTOCOL_VERSION: u16 = 1;
 use crate::sha256_digest;
 use crate::tx::SignedTx;
 use serde::{Deserialize, Serialize};
@@ -68,6 +74,12 @@ impl ReplaySummary {
 /// Evidence bundle for a settlement window (G4): reference data for replay-justified resolve.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvidenceBundle {
+    /// Schema version for this record; reader must support <= CURRENT_EVIDENCE_SCHEMA_VERSION.
+    #[serde(default)]
+    pub schema_version: u16,
+    /// Replay protocol version (hash/canonicalization contract). Mismatch => ReplayProtocolMismatch.
+    #[serde(default)]
+    pub replay_protocol_version: u16,
     pub settlement_key: String,
     pub from_tx_id: u64,
     pub to_tx_id: u64,
@@ -88,7 +100,14 @@ impl EvidenceBundle {
     }
 
     /// Validate shape and sanity (required fields, from_tx_id < to_tx_id, tx_count consistent).
+    /// Rejects unsupported schema or replay protocol version with deterministic error codes.
     pub fn validate_shape(&self) -> Result<()> {
+        if self.schema_version > CURRENT_EVIDENCE_SCHEMA_VERSION {
+            return Err(Error::UnsupportedSchemaVersion);
+        }
+        if self.replay_protocol_version != REPLAY_PROTOCOL_VERSION {
+            return Err(Error::ReplayProtocolMismatch);
+        }
         if self.settlement_key.is_empty() {
             return Err(Error::InvalidEvidenceBundle);
         }
@@ -151,6 +170,8 @@ mod tests {
     fn test_evidence_bundle_validate_shape() {
         let summary = ReplaySummary::new(0, 2, 2, 10, 9, 1, 0);
         let bundle = EvidenceBundle {
+            schema_version: CURRENT_EVIDENCE_SCHEMA_VERSION,
+            replay_protocol_version: REPLAY_PROTOCOL_VERSION,
             settlement_key: "a:b:w".to_string(),
             from_tx_id: 0,
             to_tx_id: 2,
@@ -165,5 +186,57 @@ mod tests {
             ..bundle.clone()
         };
         assert!(bad.validate_shape().is_err());
+    }
+
+    #[test]
+    fn test_evidence_bundle_unsupported_schema_version_rejected() {
+        let summary = ReplaySummary::new(0, 2, 2, 10, 9, 1, 0);
+        let bundle = EvidenceBundle {
+            schema_version: 99,
+            replay_protocol_version: REPLAY_PROTOCOL_VERSION,
+            settlement_key: "a:b:w".to_string(),
+            from_tx_id: 0,
+            to_tx_id: 2,
+            evidence_hash: "eh".to_string(),
+            replay_hash: summary.replay_hash(),
+            replay_summary: summary,
+        };
+        let err = bundle.validate_shape().unwrap_err();
+        assert!(matches!(err, Error::UnsupportedSchemaVersion));
+    }
+
+    #[test]
+    fn test_evidence_bundle_replay_protocol_mismatch_rejected() {
+        let summary = ReplaySummary::new(0, 2, 2, 10, 9, 1, 0);
+        let bundle = EvidenceBundle {
+            schema_version: CURRENT_EVIDENCE_SCHEMA_VERSION,
+            replay_protocol_version: 999,
+            settlement_key: "a:b:w".to_string(),
+            from_tx_id: 0,
+            to_tx_id: 2,
+            evidence_hash: "eh".to_string(),
+            replay_hash: summary.replay_hash(),
+            replay_summary: summary,
+        };
+        let err = bundle.validate_shape().unwrap_err();
+        assert!(matches!(err, Error::ReplayProtocolMismatch));
+    }
+
+    /// Old serialized EvidenceBundle (no schema_version/replay_protocol_version) deserializes with 0,0 and is rejected by current reader.
+    #[test]
+    fn test_evidence_bundle_v0_protocol_rejected() {
+        let summary = ReplaySummary::new(0, 2, 2, 10, 9, 1, 0);
+        let bundle = EvidenceBundle {
+            schema_version: 0,
+            replay_protocol_version: 0,
+            settlement_key: "a:b:w".to_string(),
+            from_tx_id: 0,
+            to_tx_id: 2,
+            evidence_hash: "eh".to_string(),
+            replay_hash: summary.replay_hash(),
+            replay_summary: summary,
+        };
+        let err = bundle.validate_shape().unwrap_err();
+        assert!(matches!(err, Error::ReplayProtocolMismatch));
     }
 }

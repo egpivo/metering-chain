@@ -298,6 +298,8 @@ impl State {
         let s = self.get_settlement(settlement_id)?;
         let audit = self.get_dispute_resolution_audit(settlement_id)?;
         Some(crate::evidence::EvidenceBundle {
+            schema_version: crate::evidence::CURRENT_EVIDENCE_SCHEMA_VERSION,
+            replay_protocol_version: crate::evidence::REPLAY_PROTOCOL_VERSION,
             settlement_key: settlement_id.key(),
             from_tx_id: s.from_tx_id,
             to_tx_id: s.to_tx_id,
