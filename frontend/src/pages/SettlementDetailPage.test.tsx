@@ -109,4 +109,92 @@ describe('SettlementDetailPage', () => {
       expect(screen.getByText('DISPUTE_WINDOW_CLOSED')).toBeInTheDocument();
     });
   });
+
+  it('shows not found state when settlement lookup returns null', async () => {
+    const adapter: FrontendDataAdapter = {
+      ...MockAdapter,
+      getSettlement: async () => null,
+      getEvidenceBundle: async () => null,
+    };
+
+    render(
+      <MemoryRouter
+        initialEntries={['/settlements/alice/storage/w-missing']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <AdapterProvider adapter={adapter}>
+          <Routes>
+            <Route
+              path="/settlements/:owner/:serviceId/:windowId"
+              element={<SettlementDetailPage />}
+            />
+          </Routes>
+        </AdapterProvider>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Settlement not found.')).toBeInTheDocument();
+    });
+  });
+
+  it('degrades gracefully when evidence endpoint returns ApiErrorView object', async () => {
+    const adapter: FrontendDataAdapter = {
+      ...MockAdapter,
+      getSettlement: async () => ({
+        settlement_id: 'alice:storage:w1',
+        owner: 'alice',
+        service_id: 'storage',
+        window_id: 'w1',
+        status: 'Finalized',
+        gross_spent: 50,
+        operator_share: 45,
+        protocol_fee: 5,
+        reserve_locked: 0,
+        payable: 45,
+        total_paid: 0,
+        evidence_hash: 'ev_hash_1',
+        from_tx_id: 0,
+        to_tx_id: 3,
+        replay_hash: 'replay_hash_1',
+        replay_summary: {
+          from_tx_id: 0,
+          to_tx_id: 3,
+          tx_count: 3,
+          gross_spent: 50,
+          operator_share: 45,
+          protocol_fee: 5,
+          reserve_locked: 0,
+        },
+      }),
+      getEvidenceBundle: async () => ({
+        error_code: 'EVIDENCE_NOT_FOUND',
+        message: 'not stored',
+        suggested_action: 'resolve dispute first',
+      }),
+    };
+
+    render(
+      <MemoryRouter
+        initialEntries={['/settlements/alice/storage/w1']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <AdapterProvider adapter={adapter}>
+          <Routes>
+            <Route
+              path="/settlements/:owner/:serviceId/:windowId"
+              element={<SettlementDetailPage />}
+            />
+          </Routes>
+        </AdapterProvider>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Settlement: alice:storage:w1/i)).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Integrity')).toBeInTheDocument();
+    expect(screen.queryByText('Evidence & Replay (G4)')).not.toBeInTheDocument();
+  });
 });
