@@ -62,4 +62,102 @@ describe('PolicyPage', () => {
     expect(screen.queryByText('Publish policy')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Publish new version' })).not.toBeInTheDocument();
   });
+
+  it('publishes policy then refreshes list in writable mode', async () => {
+    let published = false;
+    const listPolicies = vi.fn().mockImplementation(async () => {
+      if (!published) {
+        return [
+          {
+            scope_key: 'global',
+            version: 1,
+            effective_from_tx_id: 0,
+            status: 'Published',
+            operator_share_bps: 9000,
+            protocol_fee_bps: 1000,
+            dispute_window_secs: 86400,
+          },
+        ];
+      }
+      return [
+        {
+          scope_key: 'global',
+          version: 1,
+          effective_from_tx_id: 0,
+          status: 'Published',
+          operator_share_bps: 9000,
+          protocol_fee_bps: 1000,
+          dispute_window_secs: 86400,
+        },
+        {
+          scope_key: 'global',
+          version: 2,
+          effective_from_tx_id: 5,
+          status: 'Published',
+          operator_share_bps: 9000,
+          protocol_fee_bps: 1000,
+          dispute_window_secs: 86400,
+        },
+      ];
+    });
+    const publishPolicy = vi.fn().mockImplementation(async () => {
+      published = true;
+      return { ok: true as const };
+    });
+    const adapter: FrontendDataAdapter = {
+      ...MockAdapter,
+      readonlyMode: false,
+      listPolicies,
+      publishPolicy,
+    };
+
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <AdapterProvider adapter={adapter}>
+          <PolicyPage />
+        </AdapterProvider>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Publish new version' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Publish new version' }));
+
+    await waitFor(() => {
+      expect(publishPolicy).toHaveBeenCalledTimes(1);
+      expect(listPolicies).toHaveBeenCalledTimes(2);
+      expect(screen.getByText('2')).toBeInTheDocument();
+    });
+  });
+
+  it('shows deterministic error banner when publish policy fails', async () => {
+    const adapter: FrontendDataAdapter = {
+      ...MockAdapter,
+      readonlyMode: false,
+      publishPolicy: async () => ({
+        error_code: 'INVALID_POLICY_PARAMETERS',
+        message: 'bps sum must be 10000',
+        suggested_action: 'fix policy config',
+      }),
+    };
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <AdapterProvider adapter={adapter}>
+          <PolicyPage />
+        </AdapterProvider>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Publish new version' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Publish new version' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('INVALID_POLICY_PARAMETERS')).toBeInTheDocument();
+    });
+    expect(screen.getByText('bps sum must be 10000')).toBeInTheDocument();
+  });
 });
