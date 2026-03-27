@@ -77,7 +77,9 @@ fn init_and_apply_minimal_flow(data_dir: &Path) {
             "apply",
             "--allow-unsigned",
             "--file",
-            fixture("01_mint_alice.json").to_str().expect("fixture path"),
+            fixture("01_mint_alice.json")
+                .to_str()
+                .expect("fixture path"),
         ],
     );
     run_ok(
@@ -184,7 +186,10 @@ fn test_cli_smoke_account_meters_report_json_shape() {
 
     let report_raw = run_ok(td.path(), &["--format", "json", "report", address]);
     let report: Value = serde_json::from_str(&report_raw).expect("report json");
-    assert!(report["reports"].is_array(), "report.reports should be array");
+    assert!(
+        report["reports"].is_array(),
+        "report.reports should be array"
+    );
     let first_report = &report["reports"][0];
     assert_eq!(first_report["account"], address);
     assert!(first_report.get("service_id").is_some());
@@ -202,7 +207,11 @@ fn test_cli_json_contract_account_meters_report_keys_stable() {
     let account: Value = serde_json::from_str(&account_raw).expect("account json");
     assert_eq!(
         object_keys(&account),
-        BTreeSet::from(["address".to_string(), "balance".to_string(), "nonce".to_string()])
+        BTreeSet::from([
+            "address".to_string(),
+            "balance".to_string(),
+            "nonce".to_string()
+        ])
     );
     assert!(account["balance"].is_u64());
     assert!(account["nonce"].is_u64());
@@ -228,7 +237,10 @@ fn test_cli_json_contract_account_meters_report_keys_stable() {
 
     let report_raw = run_ok(td.path(), &["--format", "json", "report", address]);
     let report: Value = serde_json::from_str(&report_raw).expect("report json");
-    assert_eq!(object_keys(&report), BTreeSet::from(["reports".to_string()]));
+    assert_eq!(
+        object_keys(&report),
+        BTreeSet::from(["reports".to_string()])
+    );
     let first_report = &report["reports"][0];
     assert_eq!(
         object_keys(first_report),
@@ -305,7 +317,9 @@ fn test_cli_smoke_failure_unsigned_without_allow_rejected() {
         &[
             "apply",
             "--file",
-            fixture("01_mint_alice.json").to_str().expect("fixture path"),
+            fixture("01_mint_alice.json")
+                .to_str()
+                .expect("fixture path"),
         ],
     );
     assert!(

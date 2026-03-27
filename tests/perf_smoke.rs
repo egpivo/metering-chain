@@ -42,7 +42,11 @@ fn build_dataset(consumes: usize) -> Vec<SignedTx> {
 #[test]
 fn test_perf_smoke_reports_replay_snapshot_and_recompute_baselines() {
     // Local/reporting baseline only: no hard performance thresholds.
-    let datasets = [("small", 100usize), ("medium", 500usize), ("large", 1000usize)];
+    let datasets = [
+        ("small", 100usize),
+        ("medium", 500usize),
+        ("large", 1000usize),
+    ];
 
     for (name, consumes) in datasets {
         let txs = build_dataset(consumes);

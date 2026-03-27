@@ -57,11 +57,7 @@ fn test_recovery_crash_after_append_before_snapshot_persist() {
     let alice = state.get_account("alice").expect("alice exists");
     assert_eq!(alice.nonce(), 1, "open meter should consume alice nonce");
     let meter = state.get_meter("alice", "svc").expect("meter exists");
-    assert_eq!(
-        meter.total_units(),
-        0,
-        "no consume replayed yet before tx2"
-    );
+    assert_eq!(meter.total_units(), 0, "no consume replayed yet before tx2");
 }
 
 #[test]

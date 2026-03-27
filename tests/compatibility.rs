@@ -1,5 +1,5 @@
-use metering_chain::evidence::EvidenceBundle;
 use metering_chain::error::Error;
+use metering_chain::evidence::EvidenceBundle;
 use metering_chain::replay::replay_to_tip;
 use metering_chain::storage::FileStorage;
 use metering_chain::tx::{SignedTx, Transaction};
@@ -101,7 +101,9 @@ fn test_compat_unsupported_schema_error_code_stable() {
     let raw = std::fs::read_to_string(p).expect("read evidence fixture");
     let mut bundle: EvidenceBundle = serde_json::from_str(&raw).expect("deserialize fixture");
     bundle.schema_version = 999;
-    let err = bundle.validate_shape().expect_err("must reject unsupported schema");
+    let err = bundle
+        .validate_shape()
+        .expect_err("must reject unsupported schema");
     assert!(matches!(err, Error::UnsupportedSchemaVersion));
     assert_eq!(err.error_code(), "UNSUPPORTED_SCHEMA_VERSION");
 }

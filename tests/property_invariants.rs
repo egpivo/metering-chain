@@ -54,13 +54,21 @@ fn apply_all(mut state: State, txs: &[SignedTx], minters: &HashSet<String>) -> S
 
 fn total_value(state: &State) -> u128 {
     let balances: u128 = state.accounts.values().map(|a| a.balance() as u128).sum();
-    let locked: u128 = state.meters.values().map(|m| m.locked_deposit() as u128).sum();
+    let locked: u128 = state
+        .meters
+        .values()
+        .map(|m| m.locked_deposit() as u128)
+        .sum();
     balances + locked
 }
 
 fn total_accounted_value(state: &State) -> u128 {
     let balances: u128 = state.accounts.values().map(|a| a.balance() as u128).sum();
-    let locked: u128 = state.meters.values().map(|m| m.locked_deposit() as u128).sum();
+    let locked: u128 = state
+        .meters
+        .values()
+        .map(|m| m.locked_deposit() as u128)
+        .sum();
     let spent: u128 = state.meters.values().map(|m| m.total_spent() as u128).sum();
     balances + locked + spent
 }
