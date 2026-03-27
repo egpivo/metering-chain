@@ -52,6 +52,19 @@ fn apply_all(mut state: State, txs: &[SignedTx], minters: &HashSet<String>) -> S
     state
 }
 
+fn total_value(state: &State) -> u128 {
+    let balances: u128 = state.accounts.values().map(|a| a.balance() as u128).sum();
+    let locked: u128 = state.meters.values().map(|m| m.locked_deposit() as u128).sum();
+    balances + locked
+}
+
+fn total_accounted_value(state: &State) -> u128 {
+    let balances: u128 = state.accounts.values().map(|a| a.balance() as u128).sum();
+    let locked: u128 = state.meters.values().map(|m| m.locked_deposit() as u128).sum();
+    let spent: u128 = state.meters.values().map(|m| m.total_spent() as u128).sum();
+    balances + locked + spent
+}
+
 fn create_test_storage() -> (FileStorage, TempDir) {
     let temp_dir = TempDir::new().unwrap();
     let tx_log_path = temp_dir.path().join("tx.log");
@@ -170,5 +183,176 @@ proptest! {
             .expect("alice account exists");
         prop_assert_eq!(alice.nonce(), next_nonce + 1);
         prop_assert_eq!(after_valid_followup, expected_after_followup);
+    }
+
+    #[test]
+    fn prop_deposit_conservation_across_open_and_close(
+        deposit in 1_u64..500
+    ) {
+        let mut minters = HashSet::new();
+        minters.insert("minter".to_string());
+        let mut state = State::new();
+
+        let mint_tx = SignedTx::new(
+            "minter".to_string(),
+            0,
+            Transaction::Mint {
+                to: "alice".to_string(),
+                amount: 10_000,
+            },
+        );
+        state = apply(&state, &mint_tx, &ValidationContext::replay(), Some(&minters))
+            .expect("mint");
+        let baseline = total_value(&state);
+
+        let open_tx = SignedTx::new(
+            "alice".to_string(),
+            0,
+            Transaction::OpenMeter {
+                owner: "alice".to_string(),
+                service_id: "svc".to_string(),
+                deposit,
+            },
+        );
+        state = apply(&state, &open_tx, &ValidationContext::replay(), Some(&minters))
+            .expect("open should apply");
+        prop_assert_eq!(
+            total_value(&state),
+            baseline,
+            "open should move value balance -> locked deposit without loss"
+        );
+
+        let close_tx = SignedTx::new(
+            "alice".to_string(),
+            1,
+            Transaction::CloseMeter {
+                owner: "alice".to_string(),
+                service_id: "svc".to_string(),
+            },
+        );
+        state = apply(&state, &close_tx, &ValidationContext::replay(), Some(&minters))
+            .expect("close should apply");
+        prop_assert_eq!(
+            total_value(&state),
+            baseline,
+            "close should restore locked deposit to balance without value drift"
+        );
+    }
+
+    #[test]
+    fn prop_accounted_value_conservation_across_accepted_sequence(
+        units in prop::collection::vec(1_u64..20, 1..20),
+        unit_price in 1_u64..5,
+        close_meter in any::<bool>()
+    ) {
+        let (base_txs, minters) = build_valid_sequence(&units, unit_price);
+        let mut state = State::new();
+
+        state = apply(&state, &base_txs[0], &ValidationContext::replay(), Some(&minters))
+            .expect("mint");
+        let baseline = total_accounted_value(&state);
+
+        for tx in &base_txs[1..] {
+            state = apply(&state, tx, &ValidationContext::replay(), Some(&minters))
+                .expect("accepted tx should apply");
+            prop_assert_eq!(
+                total_accounted_value(&state),
+                baseline,
+                "balances + locked + total_spent should remain conserved"
+            );
+        }
+
+        if close_meter {
+            let close_tx = SignedTx::new(
+                "alice".to_string(),
+                1_u64 + units.len() as u64,
+                Transaction::CloseMeter {
+                    owner: "alice".to_string(),
+                    service_id: "svc".to_string(),
+                },
+            );
+            state = apply(&state, &close_tx, &ValidationContext::replay(), Some(&minters))
+                .expect("close should apply");
+            prop_assert_eq!(total_accounted_value(&state), baseline);
+        }
+    }
+
+    #[test]
+    fn prop_meter_totals_monotonicity_under_accepted_consumes(
+        units in prop::collection::vec(1_u64..25, 1..20),
+        unit_price in 1_u64..5
+    ) {
+        let (txs, minters) = build_valid_sequence(&units, unit_price);
+        let mut state = State::new();
+        let mut prev_units = 0u64;
+        let mut prev_spent = 0u64;
+
+        for tx in txs {
+            state = apply(&state, &tx, &ValidationContext::replay(), Some(&minters))
+                .expect("accepted tx should apply");
+            if let Some(m) = state.get_meter("alice", "svc") {
+                prop_assert!(m.total_units() >= prev_units, "total_units must be monotonic");
+                prop_assert!(m.total_spent() >= prev_spent, "total_spent must be monotonic");
+                prev_units = m.total_units();
+                prev_spent = m.total_spent();
+            }
+        }
+    }
+
+    #[test]
+    fn prop_meter_uniqueness_rejects_second_active_open(
+        deposit in 1_u64..500
+    ) {
+        let mut minters = HashSet::new();
+        minters.insert("minter".to_string());
+        let mut state = State::new();
+
+        state = apply(
+            &state,
+            &SignedTx::new(
+                "minter".to_string(),
+                0,
+                Transaction::Mint {
+                    to: "alice".to_string(),
+                    amount: 10_000,
+                }
+            ),
+            &ValidationContext::replay(),
+            Some(&minters),
+        ).expect("mint");
+
+        state = apply(
+            &state,
+            &SignedTx::new(
+                "alice".to_string(),
+                0,
+                Transaction::OpenMeter {
+                    owner: "alice".to_string(),
+                    service_id: "svc".to_string(),
+                    deposit,
+                }
+            ),
+            &ValidationContext::replay(),
+            Some(&minters),
+        ).expect("first open");
+
+        let snapshot = state.clone();
+        let duplicate_open = SignedTx::new(
+            "alice".to_string(),
+            1,
+            Transaction::OpenMeter {
+                owner: "alice".to_string(),
+                service_id: "svc".to_string(),
+                deposit,
+            },
+        );
+        let err = apply(
+            &state,
+            &duplicate_open,
+            &ValidationContext::replay(),
+            Some(&minters),
+        ).expect_err("second active meter open must fail");
+        prop_assert_eq!(err.error_code(), "INVALID_TRANSACTION");
+        prop_assert_eq!(state, snapshot, "rejected duplicate open must not mutate state");
     }
 }

@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -58,6 +59,14 @@ fn run_err(data_dir: &Path, args: &[&str]) -> String {
         String::from_utf8_lossy(&out.stderr)
     );
     String::from_utf8(out.stderr).expect("utf8 stderr")
+}
+
+fn object_keys(v: &Value) -> BTreeSet<String> {
+    v.as_object()
+        .expect("json object")
+        .keys()
+        .cloned()
+        .collect()
 }
 
 fn init_and_apply_minimal_flow(data_dir: &Path) {
@@ -139,6 +148,57 @@ fn test_cli_smoke_account_meters_report_json_shape() {
 }
 
 #[test]
+fn test_cli_json_contract_account_meters_report_keys_stable() {
+    let td = TempDir::new().expect("tempdir");
+    init_and_apply_minimal_flow(td.path());
+    let address = "0x0000000000000000000000000000000000000A11";
+
+    let account_raw = run_ok(td.path(), &["--format", "json", "account", address]);
+    let account: Value = serde_json::from_str(&account_raw).expect("account json");
+    assert_eq!(
+        object_keys(&account),
+        BTreeSet::from(["address".to_string(), "balance".to_string(), "nonce".to_string()])
+    );
+    assert!(account["balance"].is_u64());
+    assert!(account["nonce"].is_u64());
+
+    let meters_raw = run_ok(td.path(), &["--format", "json", "meters", address]);
+    let meters: Value = serde_json::from_str(&meters_raw).expect("meters json");
+    assert_eq!(
+        object_keys(&meters),
+        BTreeSet::from(["address".to_string(), "meters".to_string()])
+    );
+    let first_meter = &meters["meters"][0];
+    assert_eq!(
+        object_keys(first_meter),
+        BTreeSet::from([
+            "active".to_string(),
+            "locked_deposit".to_string(),
+            "owner".to_string(),
+            "service_id".to_string(),
+            "total_spent".to_string(),
+            "total_units".to_string(),
+        ])
+    );
+
+    let report_raw = run_ok(td.path(), &["--format", "json", "report", address]);
+    let report: Value = serde_json::from_str(&report_raw).expect("report json");
+    assert_eq!(object_keys(&report), BTreeSet::from(["reports".to_string()]));
+    let first_report = &report["reports"][0];
+    assert_eq!(
+        object_keys(first_report),
+        BTreeSet::from([
+            "account".to_string(),
+            "active".to_string(),
+            "effective_unit_price".to_string(),
+            "service_id".to_string(),
+            "total_spent".to_string(),
+            "total_units".to_string(),
+        ])
+    );
+}
+
+#[test]
 fn test_cli_smoke_signed_apply_path_minimal() {
     let td = TempDir::new().expect("tempdir");
     run_ok(td.path(), &["init"]);
@@ -208,6 +268,11 @@ fn test_cli_smoke_failure_unsigned_without_allow_rejected() {
         "expected unsigned reject message, got: {}",
         stderr
     );
+    assert!(
+        stderr.contains("Error: Signature verification failed:"),
+        "expected stable diagnostic prefix, got: {}",
+        stderr
+    );
 }
 
 #[test]
@@ -228,6 +293,11 @@ fn test_cli_smoke_failure_stale_nonce_rejected() {
     assert!(
         stderr.contains("Nonce mismatch"),
         "expected nonce mismatch, got: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("Error: Invalid transaction:"),
+        "expected stable diagnostic prefix, got: {}",
         stderr
     );
 }
