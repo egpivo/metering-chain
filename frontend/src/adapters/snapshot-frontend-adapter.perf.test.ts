@@ -91,7 +91,6 @@ describe('SnapshotFrontendAdapter perf visibility (first pass)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     // Reporting-only signal for local/CI logs (not a hard threshold gate yet).
-    // eslint-disable-next-line no-console
     console.info(
       `[snapshot_perf] first_load_ms=${firstElapsedMs.toFixed(2)} cached_query_ms=${secondElapsedMs.toFixed(2)} windows=${first.length}`
     );
@@ -127,7 +126,6 @@ describe('SnapshotFrontendAdapter perf visibility (first pass)', () => {
     expect(counters.windows_in_range).toBe(10_000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    // eslint-disable-next-line no-console
     console.info(
       `[snapshot_perf_metering] series_ms=${firstElapsedMs.toFixed(2)} counters_ms=${secondElapsedMs.toFixed(2)} windows=${counters.windows_in_range}`
     );
