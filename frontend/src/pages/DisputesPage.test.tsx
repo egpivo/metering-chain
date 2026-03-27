@@ -99,4 +99,50 @@ describe('DisputesPage', () => {
       expect(screen.getByText('BACKEND_DOWN')).toBeInTheDocument();
     });
   });
+
+  it('shows API error banner when dispute detail fetch fails for one settlement', async () => {
+    const adapterWithDetailError: FrontendDataAdapter = {
+      ...MockAdapter,
+      listSettlements: async () => [
+        {
+          settlement_id: 'alice:storage:w1',
+          owner: 'alice',
+          service_id: 'storage',
+          window_id: 'w1',
+          status: 'Disputed',
+          gross_spent: 50,
+          operator_share: 45,
+          protocol_fee: 5,
+          reserve_locked: 0,
+          payable: 45,
+          total_paid: 0,
+          evidence_hash: 'eh',
+          from_tx_id: 0,
+          to_tx_id: 3,
+          replay_hash: null,
+          replay_summary: null,
+        },
+      ],
+      getDispute: async () => {
+        throw {
+          error_code: 'DISPUTE_LOOKUP_FAILED',
+          message: 'detail query failed',
+          suggested_action: 'retry dispute query',
+        };
+      },
+    };
+
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <AdapterProvider adapter={adapterWithDetailError}>
+          <DisputesPage />
+        </AdapterProvider>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('DISPUTE_LOOKUP_FAILED')).toBeInTheDocument();
+    });
+    expect(screen.getByText('detail query failed')).toBeInTheDocument();
+  });
 });
