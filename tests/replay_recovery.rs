@@ -56,6 +56,12 @@ fn test_recovery_crash_after_append_before_snapshot_persist() {
     assert_eq!(next_tx_id, 2);
     let alice = state.get_account("alice").expect("alice exists");
     assert_eq!(alice.nonce(), 1, "open meter should consume alice nonce");
+    let meter = state.get_meter("alice", "svc").expect("meter exists");
+    assert_eq!(
+        meter.total_units(),
+        0,
+        "no consume replayed yet before tx2"
+    );
 }
 
 #[test]
@@ -74,6 +80,8 @@ fn test_recovery_crash_after_snapshot_persist_before_next_append() {
     storage.append_tx(&txs[2]).expect("append tx2");
     let (state, next_tx_id) = replay_to_tip(&storage).expect("replay with snapshot + tail");
     assert_eq!(next_tx_id, 3);
+    let alice = state.get_account("alice").expect("alice exists");
+    assert_eq!(alice.nonce(), 2, "open meter + one consume");
     let meter = state.get_meter("alice", "svc").expect("meter exists");
     assert_eq!(meter.total_units(), 5);
 }
@@ -94,6 +102,7 @@ fn test_recovery_truncated_tx_log_returns_state_error() {
         .open(&tx_log_path)
         .expect("open tx.log for truncate");
     f.set_len(meta.len() - 3).expect("truncate tx.log");
+    drop(f);
 
     let err = replay_to_tip(&storage).unwrap_err();
     assert!(matches!(err, Error::StateError(_)));
@@ -121,7 +130,7 @@ fn test_recovery_corrupted_state_bin_returns_state_error() {
 }
 
 #[test]
-fn test_recovery_mismatched_snapshot_cursor_vs_log_is_deterministic() {
+fn test_recovery_mismatched_snapshot_cursor_vs_log_returns_state_error() {
     let (mut storage, _td) = test_storage();
     let txs = base_txs();
     storage.append_tx(&txs[0]).expect("append tx0");
@@ -133,12 +142,9 @@ fn test_recovery_mismatched_snapshot_cursor_vs_log_is_deterministic() {
         .persist_state(&snap_state, 999)
         .expect("persist mismatched cursor");
 
-    let (state1, next1) = replay_to_tip(&storage).expect("replay 1");
-    let (state2, next2) = replay_to_tip(&storage).expect("replay 2");
-    assert_eq!(state1, state2);
-    assert_eq!(next1, next2);
-    assert_eq!(state1, snap_state);
-    assert_eq!(next1, 999);
+    let err = replay_to_tip(&storage).unwrap_err();
+    assert!(matches!(err, Error::StateError(_)));
+    assert_eq!(err.error_code(), "STATE_ERROR");
 }
 
 #[test]
