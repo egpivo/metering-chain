@@ -8,7 +8,7 @@ import { SettlementsPage } from './SettlementsPage';
 describe('SettlementsPage', () => {
   it('renders settlements table with rows from adapter', async () => {
     render(
-      <MemoryRouter>
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <AdapterProvider adapter={MockAdapter}>
           <SettlementsPage />
         </AdapterProvider>
