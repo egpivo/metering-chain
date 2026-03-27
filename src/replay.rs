@@ -19,7 +19,17 @@ use crate::wallet;
 pub fn replay_to_tip<S: Storage>(storage: &S) -> Result<(State, u64)> {
     match storage.load_state()? {
         Some((snapshot_state, next_tx_id)) => {
-            let txs_to_apply = storage.load_txs_from(next_tx_id)?;
+            // Detect corrupted snapshot cursor early: a cursor beyond log tip means
+            // we might silently skip transactions and report a false tip.
+            let all_txs = storage.load_txs_from(0)?;
+            let log_tip = all_txs.len() as u64;
+            if next_tx_id > log_tip {
+                return Err(Error::StateError(format!(
+                    "Snapshot cursor {} is beyond tx log tip {}",
+                    next_tx_id, log_tip
+                )));
+            }
+            let txs_to_apply = all_txs.into_iter().skip(next_tx_id as usize);
             let mut current_state = snapshot_state;
             let mut next_id = next_tx_id;
             for tx in txs_to_apply {

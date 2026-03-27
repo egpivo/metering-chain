@@ -3,6 +3,8 @@
 Run before tagging a release. All items must be satisfied for **GO**.
 
 - [ ] **Full test suite green** — `cargo test --workspace`
+- [ ] **Frontend quality green** — `frontend` CI job passes (`npm run lint`, `npm run build`)
+- [ ] **Frontend tests green** — `frontend` CI job passes (`npm run test`)
 - [ ] **Deterministic replay regression green** — Phase 4 / G4 tests in `tests/basic_flow.rs`
 - [ ] **Coverage gate green** — CI coverage job passes (see `.github/workflows/ci.yml`)
 - [ ] **No unresolved P0/P1 bug** — Triage open issues; document known issues in release notes if needed

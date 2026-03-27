@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "replay_protocol_version": 1,
+  "settlement_key": "alice:svc:w1",
+  "from_tx_id": 10,
+  "to_tx_id": 13,
+  "evidence_hash": "evidence_hash_example",
+  "replay_hash": "989532f4f841ff366f730438e66305ee8de1f43845af9ca885a4a6109634ac7f",
+  "replay_summary": {
+    "from_tx_id": 10,
+    "to_tx_id": 13,
+    "tx_count": 3,
+    "gross_spent": 50,
+    "operator_share": 45,
+    "protocol_fee": 5,
+    "reserve_locked": 0
+  }
+}

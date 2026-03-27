@@ -16,19 +16,25 @@ export function DisputesPage() {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    adapter.listSettlements({ status: 'disputed' }).then((settlements) => {
-      const disputed: DisputeRow[] = [];
-      Promise.all(
-        settlements.map((s) =>
-          adapter.getDispute(s.owner, s.service_id, s.window_id).then((d) => {
-            if (d) disputed.push({ ...d, dispute_id: d.settlement_key });
-          })
+    adapter
+      .listSettlements({ status: 'disputed' })
+      .then((settlements) =>
+        Promise.all(
+          settlements.map((s) =>
+            adapter.getDispute(s.owner, s.service_id, s.window_id).then((d) =>
+              d ? ({ ...d, dispute_id: d.settlement_key } as DisputeRow) : null
+            )
+          )
         )
-      ).then(() => setList(disputed));
-    }).catch((e: unknown) => {
-      if (e && typeof e === 'object' && 'error_code' in e) setError(e as { error_code: string; message: string; suggested_action: string });
-      else setError({ error_code: 'UNKNOWN', message: String(e), suggested_action: 'Retry.' });
-    }).finally(() => setLoading(false));
+      )
+      .then((rows) => {
+        setList(rows.filter((r): r is DisputeRow => r !== null));
+      })
+      .catch((e: unknown) => {
+        if (e && typeof e === 'object' && 'error_code' in e) setError(e as { error_code: string; message: string; suggested_action: string });
+        else setError({ error_code: 'UNKNOWN', message: String(e), suggested_action: 'Retry.' });
+      })
+      .finally(() => setLoading(false));
   }, [adapter]);
 
   const columns: Column<DisputeRow>[] = [

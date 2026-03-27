@@ -18,6 +18,7 @@ bs58 = "0.5"
 
 [dev-dependencies]
 tempfile = "3.8"
+proptest = "1"
 
 [[bin]]
 name = "sim-activity-to-consume"

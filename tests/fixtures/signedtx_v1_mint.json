@@ -1,0 +1,10 @@
+{
+  "signer": "minter",
+  "nonce": 0,
+  "kind": {
+    "Mint": {
+      "to": "bob",
+      "amount": 100
+    }
+  }
+}
