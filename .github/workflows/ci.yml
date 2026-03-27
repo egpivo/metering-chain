@@ -93,6 +93,7 @@ jobs:
       - name: Evaluate perf regression thresholds (warning only)
         run: |
           python3 - <<'PY'
+          import os
           import re
           import sys
 
@@ -125,6 +126,13 @@ jobs:
           missing = [ds for ds in baseline.keys() if ds not in metrics]
           if missing:
               print(f"::warning::perf_smoke metrics missing datasets: {', '.join(missing)}")
+              summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+              if summary_path:
+                  with open(summary_path, "a", encoding="utf-8") as s:
+                      s.write("## Perf Baseline (Warning Only)\n\n")
+                      s.write("Could not parse perf output for datasets: ")
+                      s.write(", ".join(missing))
+                      s.write("\n")
               sys.exit(0)
 
           replay_regressed = []
@@ -155,6 +163,23 @@ jobs:
                   "::warning::perf-risk recompute latency regression >25% in "
                   f"{', '.join(sorted(recompute_regressed))}. Investigate before release."
               )
+
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as s:
+                  s.write("## Perf Baseline (Warning Only)\n\n")
+                  s.write("| Dataset | Replay ms (actual/baseline) | Recompute ms (actual/baseline) |\n")
+                  s.write("|---|---:|---:|\n")
+                  for ds in ("small", "medium", "large"):
+                      s.write(
+                          f"| {ds} | {metrics[ds]['replay_ms']}/{baseline[ds]['replay_ms']} | "
+                          f"{metrics[ds]['recompute_ms']}/{baseline[ds]['recompute_ms']} |\n"
+                      )
+                  s.write("\n")
+                  if len(replay_regressed) >= 2 or recompute_regressed:
+                      s.write("Status: WARNING (non-blocking)\n")
+                  else:
+                      s.write("Status: OK\n")
 
           print("Perf warning evaluation complete (non-blocking).")
           PY
