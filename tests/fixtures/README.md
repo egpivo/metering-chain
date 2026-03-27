@@ -4,6 +4,8 @@ This directory holds versioned fixtures for schema/tx/event compatibility tests.
 
 ## Current
 
+- `evidence_bundle_v1.json`: baseline accepted EvidenceBundle fixture (schema_version=1, replay_protocol_version=1).
+- `signedtx_v1_mint.json`: baseline v1 transaction fixture accepted by current deserializer/apply path.
 - **EvidenceBundle (v0):** No on-disk file yet; v0 behavior is tested in `src/evidence.rs` (`test_evidence_bundle_v0_protocol_rejected`). Old serialized bundles (without `schema_version` / `replay_protocol_version`) deserialize with default 0 and are rejected with `ReplayProtocolMismatch`.
 
 ## When adding v2 schema
