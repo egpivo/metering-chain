@@ -104,6 +104,51 @@ fn init_and_apply_minimal_flow(data_dir: &Path) {
     );
 }
 
+fn init_and_prepare_finalized_settlement(data_dir: &Path) {
+    const OWNER: &str = "0x0000000000000000000000000000000000000A11";
+    const MINTER: &str = "0x0000000000000000000000000000000000000AAA";
+
+    init_and_apply_minimal_flow(data_dir);
+    run_with_minters_ok(
+        data_dir,
+        MINTER,
+        &[
+            "settlement",
+            "propose",
+            "--owner",
+            OWNER,
+            "--service-id",
+            "storage",
+            "--window-id",
+            "w1",
+            "--from-tx-id",
+            "0",
+            "--to-tx-id",
+            "3",
+            "--signer",
+            MINTER,
+            "--allow-unsigned",
+        ],
+    );
+    run_with_minters_ok(
+        data_dir,
+        MINTER,
+        &[
+            "settlement",
+            "finalize",
+            "--owner",
+            OWNER,
+            "--service-id",
+            "storage",
+            "--window-id",
+            "w1",
+            "--signer",
+            MINTER,
+            "--allow-unsigned",
+        ],
+    );
+}
+
 #[test]
 fn test_cli_smoke_init_and_apply_unsigned_fixture() {
     let td = TempDir::new().expect("tempdir");
@@ -299,5 +344,205 @@ fn test_cli_smoke_failure_stale_nonce_rejected() {
         stderr.contains("Error: Invalid transaction:"),
         "expected stable diagnostic prefix, got: {}",
         stderr
+    );
+}
+
+#[test]
+fn test_cli_json_contract_settlement_dispute_evidence_keys_stable() {
+    const OWNER: &str = "0x0000000000000000000000000000000000000A11";
+    const MINTER: &str = "0x0000000000000000000000000000000000000AAA";
+    let td = TempDir::new().expect("tempdir");
+    init_and_prepare_finalized_settlement(td.path());
+
+    run_with_minters_ok(
+        td.path(),
+        MINTER,
+        &[
+            "settlement",
+            "open-dispute",
+            "--owner",
+            OWNER,
+            "--service-id",
+            "storage",
+            "--window-id",
+            "w1",
+            "--reason-code",
+            "cli-contract-test",
+            "--evidence-hash",
+            "cli-contract-eh",
+            "--signer",
+            MINTER,
+            "--allow-unsigned",
+        ],
+    );
+    run_with_minters_ok(
+        td.path(),
+        MINTER,
+        &[
+            "settlement",
+            "resolve-dispute",
+            "--owner",
+            OWNER,
+            "--service-id",
+            "storage",
+            "--window-id",
+            "w1",
+            "--verdict",
+            "dismissed",
+            "--signer",
+            MINTER,
+            "--allow-unsigned",
+        ],
+    );
+
+    let settlement_raw = run_ok(
+        td.path(),
+        &[
+            "--format",
+            "json",
+            "settlement",
+            "show",
+            "--owner",
+            OWNER,
+            "--service-id",
+            "storage",
+            "--window-id",
+            "w1",
+        ],
+    );
+    let settlement: Value = serde_json::from_str(&settlement_raw).expect("settlement show json");
+    assert_eq!(
+        object_keys(&settlement),
+        BTreeSet::from([
+            "claims".to_string(),
+            "evidence_hash".to_string(),
+            "from_tx_id".to_string(),
+            "gross_spent".to_string(),
+            "operator_share".to_string(),
+            "owner".to_string(),
+            "payable".to_string(),
+            "protocol_fee".to_string(),
+            "replay_hash".to_string(),
+            "replay_summary".to_string(),
+            "reserve_locked".to_string(),
+            "schema_version".to_string(),
+            "service_id".to_string(),
+            "settlement_id".to_string(),
+            "status".to_string(),
+            "to_tx_id".to_string(),
+            "total_paid".to_string(),
+            "window_id".to_string(),
+        ])
+    );
+    assert!(settlement["schema_version"].is_u64());
+    assert!(settlement["replay_summary"].is_object());
+
+    let dispute_raw = run_ok(
+        td.path(),
+        &[
+            "--format",
+            "json",
+            "settlement",
+            "dispute-show",
+            "--owner",
+            OWNER,
+            "--service-id",
+            "storage",
+            "--window-id",
+            "w1",
+        ],
+    );
+    let dispute: Value = serde_json::from_str(&dispute_raw).expect("dispute show json");
+    assert_eq!(
+        object_keys(&dispute),
+        BTreeSet::from([
+            "resolution_audit".to_string(),
+            "schema_version".to_string(),
+            "settlement_key".to_string(),
+            "status".to_string(),
+        ])
+    );
+    assert!(dispute["resolution_audit"].is_object());
+    assert!(dispute["resolution_audit"]["replay_protocol_version"].is_u64());
+
+    let evidence_raw = run_ok(
+        td.path(),
+        &[
+            "--format",
+            "json",
+            "settlement",
+            "evidence-show",
+            "--owner",
+            OWNER,
+            "--service-id",
+            "storage",
+            "--window-id",
+            "w1",
+        ],
+    );
+    let evidence: Value = serde_json::from_str(&evidence_raw).expect("evidence show json");
+    assert_eq!(
+        object_keys(&evidence),
+        BTreeSet::from([
+            "evidence_hash".to_string(),
+            "from_tx_id".to_string(),
+            "replay_hash".to_string(),
+            "replay_protocol_version".to_string(),
+            "replay_summary".to_string(),
+            "schema_version".to_string(),
+            "settlement_key".to_string(),
+            "to_tx_id".to_string(),
+        ])
+    );
+    assert!(evidence["schema_version"].is_u64());
+    assert!(evidence["replay_protocol_version"].is_u64());
+}
+
+#[test]
+fn test_cli_diagnostics_contract_dispute_and_evidence_not_found() {
+    const OWNER: &str = "0x0000000000000000000000000000000000000A11";
+    let td = TempDir::new().expect("tempdir");
+    init_and_prepare_finalized_settlement(td.path());
+
+    let dispute_stderr = run_err(
+        td.path(),
+        &[
+            "--format",
+            "json",
+            "settlement",
+            "dispute-show",
+            "--owner",
+            OWNER,
+            "--service-id",
+            "storage",
+            "--window-id",
+            "w1",
+        ],
+    );
+    assert!(
+        dispute_stderr.contains("Error: Dispute not found"),
+        "expected deterministic dispute diagnostics, got: {}",
+        dispute_stderr
+    );
+
+    let evidence_stderr = run_err(
+        td.path(),
+        &[
+            "--format",
+            "json",
+            "settlement",
+            "evidence-show",
+            "--owner",
+            OWNER,
+            "--service-id",
+            "storage",
+            "--window-id",
+            "w1",
+        ],
+    );
+    assert!(
+        evidence_stderr.contains("Error: Evidence or bundle not found"),
+        "expected deterministic evidence diagnostics, got: {}",
+        evidence_stderr
     );
 }
