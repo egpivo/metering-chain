@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { AdapterProvider } from '../adapters/context';
 import { MockAdapter } from '../adapters/mock-adapter';
 import { SettlementsPage } from './SettlementsPage';
+import { SettlementDetailPage } from './SettlementDetailPage';
 import type { FrontendDataAdapter } from '../adapters/interface';
 
 describe('SettlementsPage', () => {
@@ -108,5 +109,77 @@ describe('SettlementsPage', () => {
     });
     expect(screen.getByText('contract changed')).toBeInTheDocument();
     expect(screen.getByText(/upgrade binary/i)).toBeInTheDocument();
+  });
+
+  it('navigates from settlements list row to settlement detail page', async () => {
+    const adapter: FrontendDataAdapter = {
+      ...MockAdapter,
+      listSettlements: async () => [
+        {
+          settlement_id: 'alice:storage:w1',
+          owner: 'alice',
+          service_id: 'storage',
+          window_id: 'w1',
+          status: 'Finalized',
+          gross_spent: 50,
+          operator_share: 45,
+          protocol_fee: 5,
+          reserve_locked: 0,
+          payable: 45,
+          total_paid: 0,
+          evidence_hash: 'ev_hash_1',
+          from_tx_id: 0,
+          to_tx_id: 3,
+          replay_hash: null,
+          replay_summary: null,
+        },
+      ],
+      getSettlement: async () => ({
+        settlement_id: 'alice:storage:w1',
+        owner: 'alice',
+        service_id: 'storage',
+        window_id: 'w1',
+        status: 'Finalized',
+        gross_spent: 50,
+        operator_share: 45,
+        protocol_fee: 5,
+        reserve_locked: 0,
+        payable: 45,
+        total_paid: 0,
+        evidence_hash: 'ev_hash_1',
+        from_tx_id: 0,
+        to_tx_id: 3,
+        replay_hash: null,
+        replay_summary: null,
+      }),
+      getEvidenceBundle: async () => null,
+    };
+
+    render(
+      <MemoryRouter
+        initialEntries={['/settlements']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <AdapterProvider adapter={adapter}>
+          <Routes>
+            <Route path="/settlements" element={<SettlementsPage />} />
+            <Route
+              path="/settlements/:owner/:serviceId/:windowId"
+              element={<SettlementDetailPage />}
+            />
+          </Routes>
+        </AdapterProvider>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('table')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('link', { name: 'alice / w1' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Settlement: alice:storage:w1/i)).toBeInTheDocument();
+    });
   });
 });
