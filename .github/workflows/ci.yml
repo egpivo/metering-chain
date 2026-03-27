@@ -99,9 +99,9 @@ jobs:
 
           # Baseline medians from .local/benchmark_baseline.md (2026-02-10)
           baseline = {
-              "small": {"replay_ms": 0, "recompute_ms": 1},
-              "medium": {"replay_ms": 2, "recompute_ms": 6},
-              "large": {"replay_ms": 5, "recompute_ms": 11},
+              "small": {"replay_ms": 0, "recompute_ms": 1, "replay_tx_per_sec": 149963.39},
+              "medium": {"replay_ms": 2, "recompute_ms": 6, "replay_tx_per_sec": 176325.96},
+              "large": {"replay_ms": 5, "recompute_ms": 11, "replay_tx_per_sec": 180497.19},
           }
           # Local provisional candidates from .local/benchmark_baseline.md (2026-03-27).
           # These are visibility checks only, not CI-ready hard gates.
@@ -116,7 +116,7 @@ jobs:
 
           line_re = re.compile(
               r"\[perf_smoke\]\s+dataset=(\w+)\s+txs=\d+\s+replay_ms=(\d+)\s+"
-              r"replay_tx_per_sec=[0-9.]+\s+snapshot_restore_ms=\d+\s+recompute_ms=(\d+)"
+              r"replay_tx_per_sec=([0-9.]+)\s+snapshot_restore_ms=\d+\s+recompute_ms=(\d+)"
           )
 
           metrics = {}
@@ -193,12 +193,13 @@ jobs:
           if summary_path:
               with open(summary_path, "a", encoding="utf-8") as s:
                   s.write("## Perf Baseline (Warning Only)\n\n")
-                  s.write("| Dataset | Replay ms (actual/baseline) | Recompute ms (actual/baseline) |\n")
-                  s.write("|---|---:|---:|\n")
+                  s.write("| Dataset | Replay ms (actual/baseline) | Recompute ms (actual/baseline) | Replay tx/s (actual/baseline) |\n")
+                  s.write("|---|---:|---:|---:|\n")
                   for ds in ("small", "medium", "large"):
                       s.write(
                           f"| {ds} | {metrics[ds]['replay_ms']}/{baseline[ds]['replay_ms']} | "
-                          f"{metrics[ds]['recompute_ms']}/{baseline[ds]['recompute_ms']} |\n"
+                          f"{metrics[ds]['recompute_ms']}/{baseline[ds]['recompute_ms']} | "
+                          f"{metrics[ds]['replay_tx_per_sec']:.2f}/{baseline[ds]['replay_tx_per_sec']:.2f} |\n"
                       )
                   s.write("\n")
                   s.write("### Local Provisional Candidates (Large Dataset)\n\n")
@@ -220,7 +221,7 @@ jobs:
                       f"{'PASS' if throughput_ok else 'WARN'} |\n"
                   )
                   s.write("\n")
-                  if len(replay_regressed) >= 2 or recompute_regressed:
+                  if len(replay_regressed) >= 2 or recompute_regressed or provisional_warnings:
                       s.write("Status: WARNING (non-blocking)\n")
                   else:
                       s.write("Status: OK\n")
