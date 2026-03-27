@@ -103,6 +103,13 @@ jobs:
               "medium": {"replay_ms": 2, "recompute_ms": 6},
               "large": {"replay_ms": 5, "recompute_ms": 11},
           }
+          # Local provisional candidates from .local/benchmark_baseline.md (2026-03-27).
+          # These are visibility checks only, not CI-ready hard gates.
+          local_provisional_large = {
+              "replay_ms_max": 7,
+              "recompute_ms_max": 14,
+              "replay_tx_per_sec_min": 150000.0,
+          }
 
           replay_regression_limit = 1.20   # >20%
           recompute_regression_limit = 1.25  # >25% (medium/large)
@@ -120,7 +127,8 @@ jobs:
                       ds = m.group(1).lower()
                       metrics[ds] = {
                           "replay_ms": int(m.group(2)),
-                          "recompute_ms": int(m.group(3)),
+                          "replay_tx_per_sec": float(m.group(3)),
+                          "recompute_ms": int(m.group(4)),
                       }
 
           missing = [ds for ds in baseline.keys() if ds not in metrics]
@@ -164,6 +172,23 @@ jobs:
                   f"{', '.join(sorted(recompute_regressed))}. Investigate before release."
               )
 
+          large = metrics["large"]
+          provisional_warnings = []
+          if large["replay_ms"] > local_provisional_large["replay_ms_max"]:
+              provisional_warnings.append(
+                  f"large replay_ms {large['replay_ms']} > {local_provisional_large['replay_ms_max']}"
+              )
+          if large["recompute_ms"] > local_provisional_large["recompute_ms_max"]:
+              provisional_warnings.append(
+                  f"large recompute_ms {large['recompute_ms']} > {local_provisional_large['recompute_ms_max']}"
+              )
+          if large["replay_tx_per_sec"] < local_provisional_large["replay_tx_per_sec_min"]:
+              provisional_warnings.append(
+                  f"large replay_tx_per_sec {large['replay_tx_per_sec']:.2f} < {local_provisional_large['replay_tx_per_sec_min']:.2f}"
+              )
+          if provisional_warnings:
+              print("::warning::local provisional perf candidates breached: " + "; ".join(provisional_warnings))
+
           summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
           if summary_path:
               with open(summary_path, "a", encoding="utf-8") as s:
@@ -175,6 +200,25 @@ jobs:
                           f"| {ds} | {metrics[ds]['replay_ms']}/{baseline[ds]['replay_ms']} | "
                           f"{metrics[ds]['recompute_ms']}/{baseline[ds]['recompute_ms']} |\n"
                       )
+                  s.write("\n")
+                  s.write("### Local Provisional Candidates (Large Dataset)\n\n")
+                  s.write("| Metric | Actual | Candidate | Result |\n")
+                  s.write("|---|---:|---:|---|\n")
+                  replay_ok = large["replay_ms"] <= local_provisional_large["replay_ms_max"]
+                  recompute_ok = large["recompute_ms"] <= local_provisional_large["recompute_ms_max"]
+                  throughput_ok = large["replay_tx_per_sec"] >= local_provisional_large["replay_tx_per_sec_min"]
+                  s.write(
+                      f"| replay_ms (max) | {large['replay_ms']} | {local_provisional_large['replay_ms_max']} | "
+                      f"{'PASS' if replay_ok else 'WARN'} |\n"
+                  )
+                  s.write(
+                      f"| recompute_ms (max) | {large['recompute_ms']} | {local_provisional_large['recompute_ms_max']} | "
+                      f"{'PASS' if recompute_ok else 'WARN'} |\n"
+                  )
+                  s.write(
+                      f"| replay_tx_per_sec (min) | {large['replay_tx_per_sec']:.2f} | {local_provisional_large['replay_tx_per_sec_min']:.2f} | "
+                      f"{'PASS' if throughput_ok else 'WARN'} |\n"
+                  )
                   s.write("\n")
                   if len(replay_regressed) >= 2 or recompute_regressed:
                       s.write("Status: WARNING (non-blocking)\n")
