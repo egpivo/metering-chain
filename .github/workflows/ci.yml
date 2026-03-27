@@ -65,6 +65,100 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
+  perf-warning:
+    name: Perf Baseline (Warning Only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Run perf smoke harness
+        run: cargo test --test perf_smoke -- --nocapture 2>&1 | tee perf_smoke_output.txt
+
+      - name: Evaluate perf regression thresholds (warning only)
+        run: |
+          python3 - <<'PY'
+          import re
+          import sys
+
+          # Baseline medians from .local/benchmark_baseline.md (2026-02-10)
+          baseline = {
+              "small": {"replay_ms": 0, "recompute_ms": 1},
+              "medium": {"replay_ms": 2, "recompute_ms": 6},
+              "large": {"replay_ms": 5, "recompute_ms": 11},
+          }
+
+          replay_regression_limit = 1.20   # >20%
+          recompute_regression_limit = 1.25  # >25% (medium/large)
+
+          line_re = re.compile(
+              r"\[perf_smoke\]\s+dataset=(\w+)\s+txs=\d+\s+replay_ms=(\d+)\s+"
+              r"replay_tx_per_sec=[0-9.]+\s+snapshot_restore_ms=\d+\s+recompute_ms=(\d+)"
+          )
+
+          metrics = {}
+          with open("perf_smoke_output.txt", "r", encoding="utf-8") as f:
+              for raw in f:
+                  m = line_re.search(raw)
+                  if m:
+                      ds = m.group(1).lower()
+                      metrics[ds] = {
+                          "replay_ms": int(m.group(2)),
+                          "recompute_ms": int(m.group(3)),
+                      }
+
+          missing = [ds for ds in baseline.keys() if ds not in metrics]
+          if missing:
+              print(f"::warning::perf_smoke metrics missing datasets: {', '.join(missing)}")
+              sys.exit(0)
+
+          replay_regressed = []
+          recompute_regressed = []
+
+          for ds, values in metrics.items():
+              b = baseline[ds]
+              # For zero-baseline latency, only flag if it rises above 1ms.
+              if b["replay_ms"] == 0:
+                  if values["replay_ms"] > 1:
+                      replay_regressed.append(ds)
+              else:
+                  if values["replay_ms"] > b["replay_ms"] * replay_regression_limit:
+                      replay_regressed.append(ds)
+
+              if ds in ("medium", "large"):
+                  if values["recompute_ms"] > b["recompute_ms"] * recompute_regression_limit:
+                      recompute_regressed.append(ds)
+
+          if len(replay_regressed) >= 2:
+              print(
+                  "::warning::perf-risk replay latency regression >20% in "
+                  f"{', '.join(sorted(replay_regressed))}. Investigate before release."
+              )
+
+          if recompute_regressed:
+              print(
+                  "::warning::perf-risk recompute latency regression >25% in "
+                  f"{', '.join(sorted(recompute_regressed))}. Investigate before release."
+              )
+
+          print("Perf warning evaluation complete (non-blocking).")
+          PY
+
   frontend-quality:
     name: Frontend Quality
     runs-on: ubuntu-latest
