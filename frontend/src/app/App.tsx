@@ -11,6 +11,8 @@ import { DemoPhase4Page } from '../pages/DemoPhase4Page';
 import { AuditDataPage } from '../pages/AuditDataPage';
 import { DemoAdapterProvider } from '../adapters/demo-context';
 import { DemoSnapshotAdapter } from '../adapters/demo-snapshot-adapter';
+import { AdapterProvider } from '../adapters/context';
+import { ScreenshotDisputesDetailErrorAdapter } from '../adapters/screenshot-disputes-detail-error-adapter';
 
 export default function App() {
   return (
@@ -23,6 +25,14 @@ export default function App() {
         <Route path="/settlements/:owner/:serviceId/:windowId" element={<SettlementDetailPage />} />
         <Route path="/claims" element={<ClaimsPage />} />
         <Route path="/disputes" element={<DisputesPage />} />
+        <Route
+          path="/demo/screenshot/disputes-detail-error"
+          element={
+            <AdapterProvider adapter={ScreenshotDisputesDetailErrorAdapter}>
+              <DisputesPage />
+            </AdapterProvider>
+          }
+        />
         <Route path="/policy" element={<PolicyPage />} />
         <Route
           path="/audit/explorer"

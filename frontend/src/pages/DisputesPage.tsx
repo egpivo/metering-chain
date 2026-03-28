@@ -46,7 +46,12 @@ export function DisputesPage() {
     <div>
       <h1 style={{ marginBottom: 'var(--space-4)' }}>Disputes</h1>
       {error && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
-      {loading ? <p style={{ color: 'var(--color-text-muted)' }}>Loading…</p> : <DataTable columns={columns} data={list} keyFn={(r) => r.dispute_id} emptyMessage="No open disputes" />}
+      {!error &&
+        (loading ? (
+          <p style={{ color: 'var(--color-text-muted)' }}>Loading…</p>
+        ) : (
+          <DataTable columns={columns} data={list} keyFn={(r) => r.dispute_id} emptyMessage="No open disputes" />
+        ))}
     </div>
   );
 }
